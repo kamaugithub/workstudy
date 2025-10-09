@@ -1,6 +1,4 @@
-Perfect ✅ — here’s a clean, professional README for your **Flutter “WorkStudy” mobile app**, describing all its core features, setup, and functionality as you’ve been building it.
-
-# WorkStudy Mobile App
+ WorkStudy Mobile App
 
 ### Overview
 
