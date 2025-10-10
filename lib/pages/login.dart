@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'signup.dart'; // Import the file where SignUp class is defined
-import 'forgot_password.dart';
+import 'signup.dart'; // Sign Up page
+import 'forgot_password.dart'; // Forgot Password page
+import 'StudentDashboard.dart'; // Student Dashboard page
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -25,9 +27,17 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Login Successful! Welcome $role."),
-          backgroundColor: Colors.green,
+          backgroundColor: const Color.fromARGB(255, 0, 0, 0),
         ),
       );
+
+      // ✅ Navigate to Student Dashboard after 1 second
+      Future.delayed(const Duration(seconds: 1), () {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const StudentDashboard()),
+        );
+      });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -65,7 +75,7 @@ class _LoginPageState extends State<LoginPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Logo / Title
+                    // App Title
                     Text(
                       "WorkStudy",
                       style: theme.textTheme.headlineMedium?.copyWith(
@@ -73,8 +83,6 @@ class _LoginPageState extends State<LoginPage> {
                         color: const Color(0xFF032540),
                       ),
                     ),
-                    const SizedBox(height: 10),
-
                     const SizedBox(height: 30),
 
                     // Email
@@ -148,7 +156,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 30),
 
-                    // Sign In Button
+                    // Login Button
                     SizedBox(
                       width: 220,
                       height: 50,
@@ -160,14 +168,14 @@ class _LoginPageState extends State<LoginPage> {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(50),
                           ),
-                          elevation: 0, // removed shadow
+                          elevation: 0,
                         ).copyWith(
                           overlayColor: MaterialStateProperty.all(
                             Colors.white.withOpacity(0.2),
                           ),
                         ),
                         child: const Text(
-                          "Login ",
+                          "Login",
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w200,
@@ -175,31 +183,52 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
-
-                    // Sign up link
-                   TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                            MaterialPageRoute(
-                            builder: (context) => const SignUpPage(),
-                          ),
-                        );
-                      },
-                      child: const Text(
-                        "Don't have an account? Sign Up",
-                        style: TextStyle(
-                          color: Color(0xFF032540),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-
-
                     const SizedBox(height: 25),
 
-  ]),
+                    // Row: Forgot Password + Sign Up
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder:
+                                    (context) => const ForgotPasswordPage(),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            "Forgot Password?",
+                            style: TextStyle(
+                              color: Color(0xFF032540),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const SignUpPage(),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            "Sign Up",
+                            style: TextStyle(
+                              color: Color(0xFF032540),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

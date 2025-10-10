@@ -1,13 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:excel/excel.dart' as excel;
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:workstudy/pages/login.dart';
-void main() {
-  runApp(
-    const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: StudentDashboard(),
-    ),
-  );
-}
 
 class StudentDashboard extends StatefulWidget {
   const StudentDashboard({super.key});
@@ -16,12 +15,12 @@ class StudentDashboard extends StatefulWidget {
   State<StudentDashboard> createState() => _StudentDashboardState();
 }
 
-class _StudentDashboardState extends State<StudentDashboard> {
+class _StudentDashboardState extends State<StudentDashboard>
+    with TickerProviderStateMixin {
   bool isSessionActive = false;
   String currentSessionDuration = "00:00:00";
   String comment = "";
 
-  // Mock Data
   final String studentName = "John Stone";
   final double totalHoursWorked = 48.5;
   final double thisWeekHours = 12.5;
@@ -42,15 +41,39 @@ class _StudentDashboardState extends State<StudentDashboard> {
     {
       "date": "2024-01-12",
       "hours": 5,
-      "status": "approved",
+      "status": "declined",
       "description": "Student registration assistance",
     },
   ];
 
+  late AnimationController _titleController;
+  late Animation<double> _horizontalMovement;
+  late Animation<double> _verticalMovement;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 6),
+    )..repeat(reverse: true);
+
+    _horizontalMovement = Tween<double>(begin: -4, end: 4).animate(
+      CurvedAnimation(parent: _titleController, curve: Curves.easeInOut),
+    );
+    _verticalMovement = Tween<double>(begin: -2, end: 2).animate(
+      CurvedAnimation(parent: _titleController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
   void handleClockIn() {
-    setState(() {
-      isSessionActive = true;
-    });
+    setState(() => isSessionActive = true);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Session Started. Don't forget to clock out!"),
@@ -79,122 +102,275 @@ class _StudentDashboardState extends State<StudentDashboard> {
       );
       return;
     }
-    setState(() {
-      comment = "";
-    });
+    setState(() => comment = "");
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Hours Submitted for Supervisor Approval.")),
     );
   }
 
-  void handleExport(String type) {
+  // ✅ EXPORT EXCEL
+Future<void> exportExcel() async {
+    final workbook = excel.Excel.createExcel();
+    final sheet = workbook['Report'];
+
+    // ✅ Add header row (must use CellValue objects)
+    sheet.appendRow([
+      excel.TextCellValue("Date"),
+      excel.TextCellValue("Hours"),
+      excel.TextCellValue("Status"),
+      excel.TextCellValue("Description"),
+    ]);
+
+    // ✅ Add data rows
+    for (var activity in recentActivities) {
+      sheet.appendRow([
+        excel.TextCellValue(activity["date"] ?? ''),
+        excel.TextCellValue(activity["hours"]?.toString() ?? ''),
+        excel.TextCellValue(activity["status"] ?? ''),
+        excel.TextCellValue(activity["description"] ?? ''),
+      ]);
+    }
+
+    // ✅ Save the file
+    final directory = await getApplicationDocumentsDirectory();
+    final path = "${directory.path}/workstudy_report.xlsx";
+    final bytes = workbook.encode();
+
+    if (bytes != null) {
+      final file = File(path);
+      file.createSync(recursive: true);
+      file.writeAsBytesSync(bytes);
+    }
+
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text("Exporting to $type...")));
+    ).showSnackBar(SnackBar(content: Text("✅ Excel exported to: $path")));
+  }
+
+  // ✅ EXPORT PDF
+  Future<void> exportPDF() async {
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        build:
+            (context) => pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  "WorkStudy Report",
+                  style: pw.TextStyle(
+                    fontSize: 22,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Table.fromTextArray(
+                  headers: ["Date", "Hours", "Status", "Description"],
+                  data:
+                      recentActivities.map((e) {
+                        return [
+                          e["date"] ?? '',
+                          e["hours"].toString(),
+                          e["status"] ?? '',
+                          e["description"] ?? '',
+                        ];
+                      }).toList(),
+                ),
+              ],
+            ),
+      ),
+    );
+
+    final directory = await getApplicationDocumentsDirectory();
+    final path = "${directory.path}/workstudy_report.pdf";
+    final file = File(path);
+    await file.writeAsBytes(await pdf.save());
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text("✅ PDF exported to: $path")));
   }
 
   @override
   Widget build(BuildContext context) {
+    const primaryColor = Color(0xFF032540);
+    const accentColor = Color(0xFF02AEEE);
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text(
-          "WorkStudy",
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1e40af), // Daystar Blue
-          ),
-        ),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16.0),
-            child: Row(
-              children: [
-                Icon(Icons.person, color: Colors.grey),
-                SizedBox(width: 4),
-                Text("Student", style: TextStyle(color: Colors.black87)),
-              ],
-            ),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+      backgroundColor: accentColor,
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Greeting
-            Text(
-              "Hello $studentName, welcome back! 👋",
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              "Ready to track your work hours today?",
-              style: TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 20),
-
-            // Stats Cards
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard(
-                    "Total Hours",
-                    totalHoursWorked.toString(),
-                    Icons.timer,
+            // 🔹 Fixed Animated Header
+            Container(
+              height: 70,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: const BoxDecoration(
+                color: accentColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatCard(
-                    "This Week",
-                    thisWeekHours.toString(),
-                    Icons.trending_up,
+                ],
+              ),
+              child: Stack(
+                children: [
+                  Center(
+                    child: AnimatedBuilder(
+                      animation: _titleController,
+                      builder: (context, child) {
+                        return Transform.translate(
+                          offset: Offset(
+                            _horizontalMovement.value,
+                            _verticalMovement.value,
+                          ),
+                          child: const Text(
+                            "WorkStudy",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                ),
-              ],
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: IconButton(
+                      icon: const Icon(Icons.logout, color: Colors.white),
+                      tooltip: "Logout",
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (_) => const LoginPage()),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 20),
 
-            // Clock In/Out Section
-            _buildClockCard(),
+            // 🔹 Scrollable Content
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 10),
+                    _fadeSlideIn(
+                      delay: 100,
+                      child: Text(
+                        "Hello $studentName 👋",
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: primaryColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      "Ready to track your work hours today?",
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 20),
 
-            const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _fadeSlideIn(
+                            delay: 200,
+                            child: _buildStatCard(
+                              "Total Hours",
+                              totalHoursWorked.toString(),
+                              Icons.timer,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _fadeSlideIn(
+                            delay: 300,
+                            child: _buildStatCard(
+                              "This Week",
+                              thisWeekHours.toString(),
+                              Icons.trending_up,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
 
-            // Comment + Submit Section
-            _buildCommentCard(),
-
-            const SizedBox(height: 20),
-
-            // Recent Activities
-            _buildActivityCard(),
-
-            const SizedBox(height: 20),
-
-            // Export Options
-            _buildExportCard(),
+                    _fadeSlideIn(
+                      delay: 400,
+                      child: _buildClockCard(primaryColor, accentColor),
+                    ),
+                    const SizedBox(height: 20),
+                    _fadeSlideIn(
+                      delay: 500,
+                      child: _buildCommentCard(primaryColor, accentColor),
+                    ),
+                    const SizedBox(height: 20),
+                    _fadeSlideIn(
+                      delay: 600,
+                      child: _buildActivityCard(primaryColor, accentColor),
+                    ),
+                    const SizedBox(height: 20),
+                    _fadeSlideIn(
+                      delay: 700,
+                      child: _buildExportCard(primaryColor, accentColor),
+                    ),
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
+  Widget _fadeSlideIn({required int delay, required Widget child}) {
+    return TweenAnimationBuilder(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: Duration(milliseconds: 700 + delay),
+      curve: Curves.easeOut,
+      builder: (context, value, _) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 30 * (1 - value)),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildStatCard(String label, String value, IconData icon) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white.withOpacity(0.85),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: Colors.blue.shade50,
-              child: Icon(icon, color: const Color(0xFF1e40af)),
+              backgroundColor: const Color(0xFF02AEEE).withOpacity(0.15),
+              child: Icon(icon, color: const Color(0xFF02AEEE)),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -203,6 +379,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: Color(0xFF032540),
                   ),
                 ),
                 Text(label, style: const TextStyle(color: Colors.grey)),
@@ -214,19 +391,20 @@ class _StudentDashboardState extends State<StudentDashboard> {
     );
   }
 
-  Widget _buildClockCard() {
+  Widget _buildClockCard(Color primaryColor, Color accentColor) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white.withOpacity(0.85),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             Row(
-              children: const [
-                Icon(Icons.access_time, color: Color(0xFF1e40af)),
-                SizedBox(width: 8),
-                Text(
+              children: [
+                Icon(Icons.access_time, color: accentColor),
+                const SizedBox(width: 8),
+                const Text(
                   "Current Session",
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
@@ -235,15 +413,16 @@ class _StudentDashboardState extends State<StudentDashboard> {
             const SizedBox(height: 6),
             Text(
               isSessionActive
-                  ? "Session in progress"
+                  ? "Session in progress..."
                   : "Start a new work session",
+              style: TextStyle(color: Colors.grey.shade600),
             ),
             const SizedBox(height: 16),
             if (isSessionActive)
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: accentColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Column(
@@ -255,11 +434,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     const SizedBox(height: 6),
                     Text(
                       currentSessionDuration,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                         fontFamily: "monospace",
-                        color: Color(0xFF1e40af),
+                        color: accentColor,
                       ),
                     ),
                   ],
@@ -269,9 +448,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
             ElevatedButton.icon(
               onPressed: isSessionActive ? handleClockOut : handleClockIn,
               style: ElevatedButton.styleFrom(
+                backgroundColor: isSessionActive ? Colors.red : primaryColor,
                 minimumSize: const Size.fromHeight(48),
-                backgroundColor:
-                    isSessionActive ? Colors.red : const Color(0xFF1e40af),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -291,10 +469,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
     );
   }
 
-  Widget _buildCommentCard() {
+  Widget _buildCommentCard(Color primaryColor, Color accentColor) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white.withOpacity(0.85),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -319,9 +498,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
               maxLines: 3,
               onChanged: (val) => setState(() => comment = val),
               decoration: InputDecoration(
-                hintText: "Describe the work...",
+                hintText: "Describe your work...",
+                filled: true,
+                fillColor: Colors.grey.shade100,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
                 ),
               ),
             ),
@@ -329,8 +511,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
             ElevatedButton.icon(
               onPressed: comment.trim().isEmpty ? null : handleSubmitHours,
               style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
                 minimumSize: const Size.fromHeight(48),
-                backgroundColor: const Color(0xFF1e40af),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -347,28 +529,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
     );
   }
 
-  Widget _buildActivityCard() {
+  Widget _buildActivityCard(Color primaryColor, Color accentColor) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white.withOpacity(0.85),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             Row(
-              children: const [
-                Icon(Icons.history, color: Color(0xFF1e40af)),
-                SizedBox(width: 8),
-                Text(
+              children: [
+                Icon(Icons.history, color: accentColor),
+                const SizedBox(width: 8),
+                const Text(
                   "Recent Activities",
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ],
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              "Your recent work sessions and approval status",
-              style: TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 12),
             Column(
@@ -378,7 +556,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade300),
+                        border: Border.all(color: Colors.grey.shade200),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
@@ -412,6 +590,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                         color:
                                             activity["status"] == "approved"
                                                 ? Colors.green
+                                                : activity["status"] ==
+                                                    "declined"
+                                                ? Colors.red
                                                 : Colors.orange,
                                         borderRadius: BorderRadius.circular(8),
                                       ),
@@ -430,6 +611,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                   activity["description"],
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w500,
+                                    color: Color(0xFF032540),
                                   ),
                                 ),
                               ],
@@ -440,7 +622,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF1e40af),
+                              color: Color(0xFF032540),
                             ),
                           ),
                         ],
@@ -448,28 +630,17 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     );
                   }).toList(),
             ),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: () {},
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(40),
-                side: const BorderSide(color: Color(0xFF1e40af)),
-              ),
-              child: const Text(
-                "View All Activities",
-                style: TextStyle(color: Color(0xFF1e40af)),
-              ),
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildExportCard() {
+  Widget _buildExportCard(Color primaryColor, Color accentColor) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white.withOpacity(0.85),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -481,20 +652,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),
-            const SizedBox(height: 6),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Download your work activity reports",
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
             const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => handleExport("Excel"),
+                    onPressed: exportExcel,
                     icon: const Icon(Icons.table_chart, color: Colors.green),
                     label: const Text(
                       "Export Excel",
@@ -505,14 +668,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => handleExport("Word"),
-                    icon: const Icon(
-                      Icons.description,
-                      color: Color(0xFF1e40af),
-                    ),
+                    onPressed: exportPDF,
+                    icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
                     label: const Text(
-                      "Export Word",
-                      style: TextStyle(color: Color(0xFF1e40af)),
+                      "Export PDF",
+                      style: TextStyle(color: Colors.red),
                     ),
                   ),
                 ),
