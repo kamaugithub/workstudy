@@ -14,6 +14,7 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool showPassword = false;
+  bool rememberMe = false; // Added for the "Remember me" checkbox
 
   void handleLogin() {
     final email = emailController.text.trim();
@@ -154,9 +155,60 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 30),
-
-                    // Login Button
+                    const SizedBox(height: 20), // Reduced spacing slightly
+                    // 🆕 Row: Remember me checkbox + Forgot password link
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: rememberMe,
+                              onChanged: (value) {
+                                setState(() {
+                                  rememberMe = value ?? false;
+                                });
+                              },
+                              activeColor: const Color(
+                                0xFF032540,
+                              ), // Maintain theme color
+                            ),
+                            const Text(
+                              "Remember me",
+                              style: TextStyle(
+                                color: Color(
+                                  0xFF032540,
+                                ), // Maintain theme color
+                              ),
+                            ),
+                          ],
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder:
+                                    (context) => const ForgotPasswordPage(),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            "Forgot password?",
+                            style: TextStyle(
+                              color: Color(
+                                0xFF02AEEE,
+                              ), // Use accent color for links
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(
+                      height: 30,
+                    ), // Increased space before login button
+                    // Login Button (Maintained original size and position)
                     SizedBox(
                       width: 220,
                       height: 50,
@@ -183,31 +235,17 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 25),
-
-                    // Row: Forgot Password + Sign Up
+                    const SizedBox(height: 25), // Maintained spacing
+                    // 🆕 Don't have an account? Sign up
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder:
-                                    (context) => const ForgotPasswordPage(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            "Forgot Password?",
-                            style: TextStyle(
-                              color: Color(0xFF032540),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+                        const Text(
+                          "Don't have an account? ",
+                          style: TextStyle(
+                            color: Color(0xFF032540),
+                          ), // Maintain theme color
                         ),
-                        const SizedBox(width: 10),
                         TextButton(
                           onPressed: () {
                             Navigator.push(
@@ -218,15 +256,18 @@ class _LoginPageState extends State<LoginPage> {
                             );
                           },
                           child: const Text(
-                            "Sign Up",
+                            "Sign up",
                             style: TextStyle(
-                              color: Color(0xFF032540),
+                              color: Color(
+                                0xFF02AEEE,
+                              ), // Use accent color for links
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
                       ],
                     ),
+                    // Removed the old "Forgot Password + Sign Up" Row to replace it with the new structure
                   ],
                 ),
               ),
