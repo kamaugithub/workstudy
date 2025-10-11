@@ -1,11 +1,20 @@
-import 'dart:io';
+import 'dart:async';
+import 'dart:typed_data'; // New: Added for handling byte lists
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'
+    show kIsWeb; // New: To check if running on web
 import 'package:intl/intl.dart';
 import 'package:excel/excel.dart' as excel;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:workstudy/export_helper/save_file_other.dart';
+// REMOVED: import 'dart:io'; (Not supported on web)
+// REMOVED: import 'package:path_provider/path_provider.dart'; (Handled in helper)
+
+// ✅ Conditional import: This line imports the correct file system logic for the platform
+import 'package:workstudy/export_helper/save_file_web.dart'
+    if (dart.library.io) 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/pages/login.dart';
 
 class StudentDashboard extends StatefulWidget {
@@ -20,6 +29,8 @@ class _StudentDashboardState extends State<StudentDashboard>
   bool isSessionActive = false;
   String currentSessionDuration = "00:00:00";
   String comment = "";
+  late Timer timer;
+  DateTime startTime = DateTime.now();
 
   final String studentName = "John Stone";
   final double totalHoursWorked = 48.5;
@@ -69,11 +80,22 @@ class _StudentDashboardState extends State<StudentDashboard>
   @override
   void dispose() {
     _titleController.dispose();
+    if (timer.isActive) timer.cancel();
     super.dispose();
   }
 
   void handleClockIn() {
-    setState(() => isSessionActive = true);
+    setState(() {
+      isSessionActive = true;
+      startTime = DateTime.now();
+      currentSessionDuration = "00:00:00";
+    });
+    timer = Timer.periodic(const Duration(seconds: 1), (Timer t) {
+      setState(() {
+        final duration = DateTime.now().difference(startTime);
+        currentSessionDuration = formatDuration(duration);
+      });
+    });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Session Started. Don't forget to clock out!"),
@@ -82,15 +104,22 @@ class _StudentDashboardState extends State<StudentDashboard>
   }
 
   void handleClockOut() {
+    if (timer.isActive) timer.cancel();
     setState(() {
       isSessionActive = false;
-      currentSessionDuration = "00:00:00";
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Session Ended. Add description and submit."),
       ),
     );
+  }
+
+  String formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
   }
 
   void handleSubmitHours() {
@@ -106,14 +135,15 @@ class _StudentDashboardState extends State<StudentDashboard>
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Hours Submitted for Supervisor Approval.")),
     );
+    // Here you can send workedTime, startTime, and description to the supervisor
   }
 
-  // ✅ EXPORT EXCEL
-Future<void> exportExcel() async {
+  // 🔄 UPDATED: EXPORT EXCEL (Now works on Web and Mobile/Desktop)
+  Future<void> exportExcel() async {
     final workbook = excel.Excel.createExcel();
     final sheet = workbook['Report'];
 
-    // ✅ Add header row (must use CellValue objects)
+    // Add header row (must use CellValue objects)
     sheet.appendRow([
       excel.TextCellValue("Date"),
       excel.TextCellValue("Hours"),
@@ -121,7 +151,7 @@ Future<void> exportExcel() async {
       excel.TextCellValue("Description"),
     ]);
 
-    // ✅ Add data rows
+    // Add data rows
     for (var activity in recentActivities) {
       sheet.appendRow([
         excel.TextCellValue(activity["date"] ?? ''),
@@ -131,23 +161,28 @@ Future<void> exportExcel() async {
       ]);
     }
 
-    // ✅ Save the file
-    final directory = await getApplicationDocumentsDirectory();
-    final path = "${directory.path}/workstudy_report.xlsx";
     final bytes = workbook.encode();
+    if (bytes == null) return;
 
-    if (bytes != null) {
-      final file = File(path);
-      file.createSync(recursive: true);
-      file.writeAsBytesSync(bytes);
+    const fileName = "workstudy_report.xlsx";
+    String message;
+
+    if (kIsWeb) {
+      // 🌐 Web: Triggers a browser download using saveFileWeb helper
+      saveFileWeb(Uint8List.fromList(bytes), fileName);
+      message = "✅ Excel file download initiated.";
+    } else {
+      // 📱 Desktop/Mobile: Writes to the device's file system using saveFileOther helper
+      final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
+      message = "✅ Excel exported to: $path";
     }
 
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text("✅ Excel exported to: $path")));
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // ✅ EXPORT PDF
+  // 🔄 UPDATED: EXPORT PDF (Now works on Web and Mobile/Desktop)
   Future<void> exportPDF() async {
     final pdf = pw.Document();
     pdf.addPage(
@@ -181,14 +216,23 @@ Future<void> exportExcel() async {
       ),
     );
 
-    final directory = await getApplicationDocumentsDirectory();
-    final path = "${directory.path}/workstudy_report.pdf";
-    final file = File(path);
-    await file.writeAsBytes(await pdf.save());
+    final bytes = await pdf.save();
+    const fileName = "workstudy_report.pdf";
+    String message;
+
+    if (kIsWeb) {
+      // 🌐 Web: Triggers a browser download using saveFileWeb helper
+      saveFileWeb(bytes, fileName);
+      message = "✅ PDF file download initiated.";
+    } else {
+      // 📱 Desktop/Mobile: Writes to the device's file system using saveFileOther helper
+      final path = await saveFileOther(bytes, fileName);
+      message = "✅ PDF exported to: $path";
+    }
 
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text("✅ PDF exported to: $path")));
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -509,7 +553,7 @@ Future<void> exportExcel() async {
             ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
-              onPressed: comment.trim().isEmpty ? null : handleSubmitHours,
+              onPressed: handleSubmitHours,
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryColor,
                 minimumSize: const Size.fromHeight(48),
