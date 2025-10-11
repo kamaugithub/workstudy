@@ -31,6 +31,8 @@ class _StudentDashboardState extends State<StudentDashboard>
   String comment = "";
   late Timer timer;
   DateTime startTime = DateTime.now();
+  // ✅ FIX: Moved selectedTab to the State class to manage its state correctly
+  String selectedActivityTab = 'pending';
 
   final String studentName = "John Stone";
   final double totalHoursWorked = 48.5;
@@ -489,13 +491,18 @@ class _StudentDashboardState extends State<StudentDashboard>
                 ),
               ),
             const SizedBox(height: 16),
+            // ⭐ CHANGE: Removed minimumSize for smaller horizontal length
             ElevatedButton.icon(
               onPressed: isSessionActive ? handleClockOut : handleClockIn,
               style: ElevatedButton.styleFrom(
                 backgroundColor: isSessionActive ? Colors.red : primaryColor,
-                minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
+                ),
+                // Add horizontal padding to control button size
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 17,
                 ),
               ),
               icon: Icon(
@@ -552,19 +559,26 @@ class _StudentDashboardState extends State<StudentDashboard>
               ),
             ),
             const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: handleSubmitHours,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryColor,
-                minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            // ⭐ CHANGE: Removed minimumSize for smaller horizontal length, wrapped in Center
+            Center(
+              child: ElevatedButton.icon(
+                onPressed: handleSubmitHours,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryColor,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  // Add horizontal padding to control button size
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 17,
+                  ),
                 ),
-              ),
-              icon: const Icon(Icons.send, color: Colors.white),
-              label: const Text(
-                "Submit Hours for Approval",
-                style: TextStyle(color: Colors.white, fontSize: 16),
+                icon: const Icon(Icons.send, color: Colors.white),
+                label: const Text(
+                  "Submit Hours for Approval",
+                  style: TextStyle(color: Colors.white, fontSize: 16),
+                ),
               ),
             ),
           ],
@@ -573,7 +587,13 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
   }
 
+  // ✅ FIXED: Removed StatefulBuilder and directly used setState for the main State class.
   Widget _buildActivityCard(Color primaryColor, Color accentColor) {
+    List<Map<String, dynamic>> filteredActivities =
+        recentActivities
+            .where((activity) => activity["status"] == selectedActivityTab)
+            .toList();
+
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
@@ -582,6 +602,7 @@ class _StudentDashboardState extends State<StudentDashboard>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Header
             Row(
               children: [
                 Icon(Icons.history, color: accentColor),
@@ -593,88 +614,159 @@ class _StudentDashboardState extends State<StudentDashboard>
               ],
             ),
             const SizedBox(height: 12),
-            Column(
-              children:
-                  recentActivities.map((activity) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade200),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+
+            // Tabs (Pending | Approved | Declined)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildTabButton(
+                  label: 'Pending',
+                  color: Colors.orange,
+                  isSelected: selectedActivityTab == 'pending',
+                  onTap: () => setState(() => selectedActivityTab = 'pending'),
+                ),
+                _buildTabButton(
+                  label: 'Approved',
+                  color: Colors.green,
+                  isSelected: selectedActivityTab == 'approved',
+                  onTap: () => setState(() => selectedActivityTab = 'approved'),
+                ),
+                _buildTabButton(
+                  label: 'Declined',
+                  color: Colors.red,
+                  isSelected: selectedActivityTab == 'declined',
+                  onTap: () => setState(() => selectedActivityTab = 'declined'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Scrollable Activities - Wrapped in SizedBox for a fixed height within the card
+            // which prevents layout issues when in a SingleChildScrollView
+            SizedBox(
+              height: 200, // Fixed height for the list to function correctly
+              child:
+                  filteredActivities.isEmpty
+                      ? const Center(
+                        child: Text(
+                          "No activities available",
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
+                      : ListView.builder(
+                        itemCount: filteredActivities.length,
+                        itemBuilder: (context, index) {
+                          final activity = filteredActivities[index];
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey.shade200),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
                               children: [
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.calendar_today,
-                                      size: 14,
-                                      color: Colors.grey,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      activity["date"],
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.calendar_today,
+                                            size: 14,
+                                            color: Colors.grey,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            activity["date"],
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  activity["status"] ==
+                                                          "approved"
+                                                      ? Colors.green
+                                                      : activity["status"] ==
+                                                          "declined"
+                                                      ? Colors.red
+                                                      : Colors.orange,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              activity["status"],
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color:
-                                            activity["status"] == "approved"
-                                                ? Colors.green
-                                                : activity["status"] ==
-                                                    "declined"
-                                                ? Colors.red
-                                                : Colors.orange,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        activity["status"],
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        activity["description"],
                                         style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: Color(0xFF032540),
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(height: 4),
                                 Text(
-                                  activity["description"],
+                                  "${activity["hours"]}h",
                                   style: const TextStyle(
-                                    fontWeight: FontWeight.w500,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
                                     color: Color(0xFF032540),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          Text(
-                            "${activity["hours"]}h",
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF032540),
-                            ),
-                          ),
-                        ],
+                          );
+                        },
                       ),
-                    );
-                  }).toList(),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // Helper widget for tabs
+  Widget _buildTabButton({
+    required String label,
+    required Color color,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? color : Colors.grey.shade600,
+          ),
         ),
       ),
     );
