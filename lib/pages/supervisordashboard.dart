@@ -190,10 +190,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
 
   Future<void> _exportPDF(String reportType) async {
     final pdf = pw.Document();
-    final data =
-        _getReportData(
-          reportType,
-        ).map((row) => row.map((e) => e.value.toString()).toList()).toList();
+    final data = _getReportData(reportType)
+        .map((row) => row.map((e) => e.toString()).toList())
+        .toList();
+
     final headers = data.removeAt(0);
 
     pdf.addPage(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:workstudy/pages/admindashboard.dart';
 import 'signup.dart'; // Sign Up page
 import 'forgot_password.dart'; // Forgot Password page
 import 'StudentDashboard.dart'; // Student Dashboard page
@@ -36,7 +37,7 @@ class _LoginPageState extends State<LoginPage> {
       Future.delayed(const Duration(seconds: 1), () {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const StudentDashboard()),
+          MaterialPageRoute(builder: (context) => const AdminDashboard()),
         );
       });
     } else {
@@ -155,7 +156,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20), // Reduced spacing slightly
+                    const SizedBox(height: 20), 
                     // 🆕 Row: Remember me checkbox + Forgot password link
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -207,8 +208,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(
                       height: 30,
-                    ), // Increased space before login button
-                    // Login Button (Maintained original size and position)
+                    ),
                     SizedBox(
                       width: 220,
                       height: 50,
@@ -235,7 +235,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 25), // Maintained spacing
+                    const SizedBox(height: 25),
                     // 🆕 Don't have an account? Sign up
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
