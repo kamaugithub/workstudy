@@ -10,7 +10,6 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard>
     with TickerProviderStateMixin {
-
   late TabController _tabController;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -51,7 +50,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     super.dispose();
   }
 
-  /// ✅ Added progress indicator for exporting reports
   void _handleExport(String format) async {
     showDialog(
       context: context,
@@ -59,8 +57,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
-    await Future.delayed(const Duration(seconds: 2)); // simulate export delay
-
+    await Future.delayed(const Duration(seconds: 2));
     if (mounted) Navigator.pop(context);
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -190,41 +187,46 @@ class _AdminDashboardState extends State<AdminDashboard>
         child: SafeArea(
           child: Column(
             children: [
-              // Header with animated title and logout
+              // ---------------- Header ----------------
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 8,
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Stack(
+                  alignment: Alignment.center,
                   children: [
                     FadeTransition(
                       opacity: _fadeAnimation,
                       child: const Text(
-                        "WORK STUDY",
+                        "WorkStudy",
                         style: TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
-                          letterSpacing: 1.5,
+                          letterSpacing: 1.2,
                         ),
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.logout, color: Colors.white),
-                      onPressed: () {
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (_) => const LoginPage()),
-                        );
-                      },
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        icon: const Icon(Icons.logout, color: Colors.white),
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const LoginPage(),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
               ),
 
-              // Tabs
+              // ---------------- Tabs ----------------
               Container(
                 color: Colors.white,
                 child: TabBar(
@@ -240,7 +242,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 ),
               ),
 
-              // Content
+              // ---------------- Tab Content ----------------
               Expanded(
                 child: TabBarView(
                   controller: _tabController,
@@ -354,10 +356,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         children: [
           Row(
             children: [
-              IconButton(
-                icon: const Icon(Icons.search, color: Colors.blue),
-                onPressed: _showSearchDialog,
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.search),
+                  label: const Text("Search"),
+                  onPressed: _showSearchDialog,
+                ),
               ),
+              const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.person_add_alt_1),
@@ -365,9 +371,9 @@ class _AdminDashboardState extends State<AdminDashboard>
                   onPressed: () => _addUserDialog("Student"),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
-                child: OutlinedButton.icon(
+                child: ElevatedButton.icon(
                   icon: const Icon(Icons.person_add),
                   label: const Text("Add Supervisor"),
                   onPressed: () => _addUserDialog("Supervisor"),
@@ -426,7 +432,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // ---------------- Widgets ----------------
+  // ---------------- Helper Widgets ----------------
   Widget _statCard(IconData icon, String title, String value, Color color) {
     return Card(
       elevation: 3,
