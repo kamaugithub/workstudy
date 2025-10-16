@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:workstudy/pages/login.dart';
+import 'dart:async';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -22,13 +23,13 @@ class _AdminDashboardState extends State<AdminDashboard>
   };
 
   final List<Map<String, String>> users = [
-    {"role": "Student", "email": "johndoe220308@daystar.ac.ke"},
     {"role": "Supervisor", "email": "janesmith200308@daystar.ac.ke"},
     {"role": "Student", "email": "kelvinjohnson210308@daystar.ac.ke"},
-    {"role": "Student", "email": "aliceelliotn210308@daystar.ac.ke"},
+    {"role": "Student", "email": "alicestones3245@daystar.ac.ke"},
   ];
 
   String searchQuery = "";
+  bool isLoading = false;
 
   @override
   void initState() {
@@ -51,24 +52,43 @@ class _AdminDashboardState extends State<AdminDashboard>
     super.dispose();
   }
 
-  void _handleExport(String format) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
+  Future<void> _showLoadingEffect(VoidCallback action) async {
+    setState(() => isLoading = true);
     await Future.delayed(const Duration(seconds: 2));
-    if (mounted) Navigator.pop(context);
+    setState(() => isLoading = false);
+    action();
+  }
 
+  bool _isValidEmail(String email) {
+    final regex = RegExp(r'^[\w\.-]+@[\w\.-]+\.\w+$');
+    return regex.hasMatch(email);
+  }
+
+  void _showSnack(String message, {Color color = Colors.redAccent}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          "✅ ${format.toUpperCase()} report generated successfully!",
+        backgroundColor: color,
+        content: Center(
+          child: Text(message, style: const TextStyle(color: Colors.white)),
         ),
         duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 40, left: 40, right: 40),
       ),
     );
+  }
+
+  void _handleExport(String format) async {
+    _showLoadingEffect(() {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "✅ ${format.toUpperCase()} report generated successfully!",
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    });
   }
 
   void _confirmDelete(String email) {
@@ -85,14 +105,17 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () {
-                  setState(() {
-                    users.removeWhere((u) => u["email"] == email);
+                onPressed: () async {
+                  Navigator.pop(context); // close dialog first
+                  await _showLoadingEffect(() {
+                    setState(() {
+                      users.removeWhere((u) => u["email"] == email);
+                    });
+                    _showSnack(
+                      "$email removed successfully.",
+                      color: Colors.green,
+                    );
                   });
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("$email removed successfully.")),
-                  );
                 },
                 child: const Text("Delete"),
               ),
@@ -102,14 +125,14 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _addUserDialog(String role) {
-    final nameController = TextEditingController();
+    final controller = TextEditingController();
     showDialog(
       context: context,
       builder:
           (_) => AlertDialog(
             title: Text("Add $role"),
             content: TextField(
-              controller: nameController,
+              controller: controller,
               decoration: InputDecoration(
                 hintText: "Enter $role email",
                 border: OutlineInputBorder(
@@ -123,19 +146,95 @@ class _AdminDashboardState extends State<AdminDashboard>
                 child: const Text("Cancel"),
               ),
               ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    users.add({
-                      "email": nameController.text,
-                      "role": "$role • New Entry",
+                onPressed: () async {
+                  final email = controller.text.trim();
+                  if (!_isValidEmail(email)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please use a correct/good email format.");
+                    return;
+                  }
+
+                  Navigator.pop(context); // close dialog first
+                  await _showLoadingEffect(() {
+                    setState(() {
+                      users.add({"email": email, "role": "$role • New"});
                     });
+                    _showSnack(
+                      "$role added successfully.",
+                      color: Colors.greenAccent,
+                    );
                   });
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("$role added successfully.")),
-                  );
                 },
                 child: const Text("Add"),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _editUserDialog(Map<String, String> user) {
+    final emailController = TextEditingController(text: user["email"]);
+    String role = user["role"]!.split("•")[0].trim();
+
+    showDialog(
+      context: context,
+      builder:
+          (_) => AlertDialog(
+            title: const Text("Edit User"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: emailController,
+                  decoration: const InputDecoration(
+                    labelText: "Email",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: role,
+                  items:
+                      ["Student", "Supervisor"]
+                          .map(
+                            (r) => DropdownMenuItem(value: r, child: Text(r)),
+                          )
+                          .toList(),
+                  onChanged: (val) => role = val!,
+                  decoration: const InputDecoration(
+                    labelText: "Role",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final email = emailController.text.trim();
+                  if (!_isValidEmail(email)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please use a correct/good email format.");
+                    return;
+                  }
+
+                  Navigator.pop(context); // close dialog
+                  await _showLoadingEffect(() {
+                    setState(() {
+                      user["email"] = email;
+                      user["role"] = role;
+                    });
+                    _showSnack(
+                      "✅ User updated successfully.",
+                      color: Colors.greenAccent,
+                    );
+                  });
+                },
+                child: const Text("Save"),
               ),
             ],
           ),
@@ -152,14 +251,13 @@ class _AdminDashboardState extends State<AdminDashboard>
             content: TextField(
               controller: controller,
               decoration: InputDecoration(
-                hintText: "Enter email",
+                hintText: "Enter email or role",
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              onChanged: (val) {
-                setState(() => searchQuery = val.toLowerCase());
-              },
+              onChanged:
+                  (val) => setState(() => searchQuery = val.toLowerCase()),
             ),
             actions: [
               TextButton(
@@ -174,94 +272,110 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
+  // --- UI ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF02AEEE), Color(0xFF02AEEE)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // ---------------- Header ----------------
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: const Text(
-                        "WorkStudy",
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF02AEEE), Color(0xFF02AEEE)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: SafeArea(
+              child: Column(
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
                     ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: IconButton(
-                        icon: const Icon(Icons.logout, color: Colors.white),
-                        onPressed: () {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const LoginPage(),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: const Text(
+                            "WorkStudy",
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: IconButton(
+                            icon: const Icon(Icons.logout, color: Colors.white),
+                            onPressed: () {
+                              Navigator.pushReplacement(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const LoginPage(),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
+                  ),
 
-              // ---------------- Tabs ----------------
-              Container(
-                color: Colors.white,
-                child: TabBar(
-                  controller: _tabController,
-                  labelColor: Colors.blue,
-                  unselectedLabelColor: Colors.black54,
-                  indicatorColor: Colors.blueAccent,
-                  tabs: const [
-                    Tab(icon: Icon(Icons.dashboard), text: "Overview"),
-                    Tab(icon: Icon(Icons.group), text: "Users"),
-                    Tab(icon: Icon(Icons.bar_chart), text: "Reports"),
-                  ],
-                ),
-              ),
+                  // Tabs
+                  Container(
+                    color: Colors.white,
+                    child: TabBar(
+                      controller: _tabController,
+                      labelColor: Colors.blue,
+                      unselectedLabelColor: Colors.black54,
+                      indicatorColor: Colors.blueAccent,
+                      tabs: const [
+                        Tab(icon: Icon(Icons.dashboard), text: "Overview"),
+                        Tab(icon: Icon(Icons.group), text: "Users"),
+                        Tab(icon: Icon(Icons.bar_chart), text: "Reports"),
+                      ],
+                    ),
+                  ),
 
-              // ---------------- Tab Content ----------------
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildOverviewTab(),
-                    _buildUsersTab(),
-                    _buildReportsTab(),
-                  ],
-                ),
+                  // Tab content
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildOverviewTab(),
+                        _buildUsersTab(),
+                        _buildReportsTab(),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+
+          // Loading overlay
+          if (isLoading)
+            Container(
+              color: Colors.black54.withOpacity(0.5),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 4,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 
-  // ---------------- Overview Tab ----------------
+  // --- Overview Tab ---
   Widget _buildOverviewTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -274,11 +388,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               color: Colors.white.withOpacity(0.9),
               borderRadius: BorderRadius.circular(12),
               boxShadow: const [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 4,
-                  offset: Offset(2, 2),
-                ),
+                BoxShadow(color: Colors.black12, blurRadius: 4),
               ],
             ),
             child: const Column(
@@ -293,10 +403,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   ),
                 ),
                 SizedBox(height: 4),
-                Text(
-                  "Manage users, monitor progress, and generate reports.",
-                  style: TextStyle(color: Colors.black54),
-                ),
+                Text("Manage users, monitor progress, and generate reports."),
               ],
             ),
           ),
@@ -340,7 +447,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // ---------------- Users Tab ----------------
+  // --- Users Tab ---
   Widget _buildUsersTab() {
     final filteredUsers =
         users
@@ -358,25 +465,34 @@ class _AdminDashboardState extends State<AdminDashboard>
           Row(
             children: [
               Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.search),
-                  label: const Text("Search"),
+                child: _actionButton(
+                  icon: Icons.search,
+                  label: "Search",
+                  color: Colors.black87,
+                  textColor: Colors.white,
+                  iconColor: Colors.white,
                   onPressed: _showSearchDialog,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.person_add_alt_1),
-                  label: const Text("Add Student"),
+                child: _actionButton(
+                  icon: Icons.person_add_alt_1,
+                  label: "Add Student",
+                  color: Colors.white,
+                  textColor: Colors.blue,
+                  iconColor: Colors.blue,
                   onPressed: () => _addUserDialog("Student"),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.person_add),
-                  label: const Text("Add Supervisor"),
+                child: _actionButton(
+                  icon: Icons.person_add,
+                  label: "Add Supervisor",
+                  color: Colors.white,
+                  textColor: Colors.blue,
+                  iconColor: Colors.blue,
                   onPressed: () => _addUserDialog("Supervisor"),
                 ),
               ),
@@ -401,8 +517,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () {},
+                          icon: const Icon(
+                            Icons.edit,
+                            color: Colors.greenAccent,
+                          ),
+                          onPressed: () => _editUserDialog(u),
                         ),
                         IconButton(
                           icon: const Icon(
@@ -423,7 +542,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // ---------------- Reports Tab ----------------
+  // --- Reports Tab ---
   Widget _buildReportsTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -433,7 +552,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // ---------------- Helper Widgets ----------------
+  // --- Helper Widgets ---
   Widget _statCard(IconData icon, String title, String value, Color color) {
     return Card(
       elevation: 3,
@@ -455,6 +574,35 @@ class _AdminDashboardState extends State<AdminDashboard>
             const SizedBox(height: 4),
             Text(title, style: const TextStyle(color: Colors.black54)),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _actionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required Color textColor,
+    required Color iconColor,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 45,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: ElevatedButton.icon(
+          icon: Icon(icon, size: 18, color: iconColor),
+          label: Text(label, style: TextStyle(fontSize: 14, color: textColor)),
+          onPressed: onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: color,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            elevation: 3,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+          ),
         ),
       ),
     );
