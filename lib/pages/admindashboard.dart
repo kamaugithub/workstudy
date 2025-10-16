@@ -22,9 +22,10 @@ class _AdminDashboardState extends State<AdminDashboard>
   };
 
   final List<Map<String, String>> users = [
-    {"name": "John Doe", "role": "Student • Computer Science"},
-    {"name": "Dr. Jane Smith", "role": "Supervisor • Engineering"},
-    {"name": "Alice Johnson", "role": "Student • Business Studies"},
+    {"role": "Student", "email": "johndoe220308@daystar.ac.ke"},
+    {"role": "Supervisor", "email": "janesmith200308@daystar.ac.ke"},
+    {"role": "Student", "email": "kelvinjohnson210308@daystar.ac.ke"},
+    {"role": "Student", "email": "aliceelliotn210308@daystar.ac.ke"},
   ];
 
   String searchQuery = "";
@@ -70,13 +71,13 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  void _confirmDelete(String name) {
+  void _confirmDelete(String email) {
     showDialog(
       context: context,
       builder:
           (context) => AlertDialog(
             title: const Text("Delete User"),
-            content: Text("Are you sure you want to remove $name?"),
+            content: Text("Are you sure you want to remove $email?"),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -86,11 +87,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
                 onPressed: () {
                   setState(() {
-                    users.removeWhere((u) => u["name"] == name);
+                    users.removeWhere((u) => u["email"] == email);
                   });
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("$name removed successfully.")),
+                    SnackBar(content: Text("$email removed successfully.")),
                   );
                 },
                 child: const Text("Delete"),
@@ -110,7 +111,7 @@ class _AdminDashboardState extends State<AdminDashboard>
             content: TextField(
               controller: nameController,
               decoration: InputDecoration(
-                hintText: "Enter $role name",
+                hintText: "Enter $role email",
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -125,7 +126,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 onPressed: () {
                   setState(() {
                     users.add({
-                      "name": nameController.text,
+                      "email": nameController.text,
                       "role": "$role • New Entry",
                     });
                   });
@@ -151,7 +152,7 @@ class _AdminDashboardState extends State<AdminDashboard>
             content: TextField(
               controller: controller,
               decoration: InputDecoration(
-                hintText: "Enter name or role",
+                hintText: "Enter email",
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -345,7 +346,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         users
             .where(
               (u) =>
-                  u["name"]!.toLowerCase().contains(searchQuery) ||
+                  u["email"]!.toLowerCase().contains(searchQuery) ||
                   u["role"]!.toLowerCase().contains(searchQuery),
             )
             .toList();
@@ -363,7 +364,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   onPressed: _showSearchDialog,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.person_add_alt_1),
@@ -371,7 +372,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   onPressed: () => _addUserDialog("Student"),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.person_add),
@@ -392,7 +393,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   elevation: 2,
                   child: ListTile(
                     title: Text(
-                      u["name"]!,
+                      u["email"]!,
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text(u["role"]!),
@@ -408,7 +409,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                             Icons.delete,
                             color: Colors.redAccent,
                           ),
-                          onPressed: () => _confirmDelete(u["name"]!),
+                          onPressed: () => _confirmDelete(u["email"]!),
                         ),
                       ],
                     ),
