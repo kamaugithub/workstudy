@@ -12,30 +12,71 @@ class ForgotPasswordPage extends StatefulWidget {
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _emailController = TextEditingController();
+  bool isLoading = false; // Loading effect flag
+
+  // ✅ Loading effect function
+  Future<void> _showLoadingEffect(VoidCallback action) async {
+    setState(() => isLoading = true);
+    await Future.delayed(const Duration(seconds: 2));
+    setState(() => isLoading = false);
+    action();
+  }
+
+  // ✅ Updated email validation (accepts all valid email domains)
+  bool _isValidEmail(String email) {
+    final emailRegex = RegExp(
+      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+    );
+    return emailRegex.hasMatch(email);
+  }
 
   void handleResetPassword() {
     if (_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            "Password reset link sent to your email",
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: const Color(0xFF032540), // Themed dark blue
-          duration: const Duration(seconds: 3),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.symmetric(horizontal: 60, vertical: 20),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
+      final email = _emailController.text.trim();
 
-      // 🔹 Navigate to NewPasswordPage (fix)
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => const NewPasswordPage()),
-      );
+      if (!_isValidEmail(email)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              "Please enter a valid email address (e.g., example@gmail.com)",
+              style: TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.redAccent,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+        return;
+      }
+
+      // 🔹 Show loading effect before proceeding
+      _showLoadingEffect(() {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              "Password reset link sent to your email",
+              style: TextStyle(color: Colors.white),
+            ),
+            backgroundColor: const Color(0xFF032540),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.symmetric(horizontal: 60, vertical: 20),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+
+        // Navigate to NewPasswordPage
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const NewPasswordPage()),
+        );
+      });
     }
   }
 
@@ -54,12 +95,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         ),
         child: Column(
           children: [
-            // 🔹 Branded Header (stuck at the top)
+            // 🔹 Branded Header
             Padding(
-              padding: const EdgeInsets.only(
-                top: 60,
-                bottom: 50,
-              ), // reduced bottom padding
+              padding: const EdgeInsets.only(top: 60, bottom: 50),
               child: Text(
                 "WorkStudy",
                 style: TextStyle(
@@ -105,11 +143,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                             ),
                           ),
                           const SizedBox(height: 24),
-                          // Email TextField
+
+                          // Email Field
                           TextFormField(
                             controller: _emailController,
                             decoration: InputDecoration(
                               labelText: "Email",
+                              hintText: "e.g. example@gmail.com",
                               prefixIcon: const Icon(
                                 Icons.email_outlined,
                                 color: Color(0xFF032540),
@@ -137,20 +177,21 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                               if (value == null || value.isEmpty) {
                                 return "Please enter your email";
                               }
-                              if (!value.contains('@')) {
-                                return "Enter a valid email";
+                              if (!_isValidEmail(value)) {
+                                return "Enter a valid email format";
                               }
                               return null;
                             },
                           ),
 
                           const SizedBox(height: 24),
-                          // Reset Button
+
+                          // Reset Button with loading effect
                           SizedBox(
                             width: 200,
                             height: 45,
                             child: ElevatedButton(
-                              onPressed: handleResetPassword,
+                              onPressed: isLoading ? null : handleResetPassword,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF032540),
                                 foregroundColor: Colors.white,
@@ -159,17 +200,28 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                                 ),
                                 elevation: 0,
                               ),
-                              child: const Text(
-                                "Reset Password",
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                              child:
+                                  isLoading
+                                      ? const SizedBox(
+                                        width: 25,
+                                        height: 25,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 3,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                      : const Text(
+                                        "Reset Password",
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
                             ),
                           ),
 
                           const SizedBox(height: 14),
+
                           // Back to Login
                           TextButton(
                             onPressed: () {

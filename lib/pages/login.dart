@@ -16,6 +16,15 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController passwordController = TextEditingController();
   bool showPassword = false;
   bool rememberMe = false; // Added for the "Remember me" checkbox
+  bool isLoading = false; // Added to support loading effect
+
+  // ✅ Added loading effect function
+  Future<void> _showLoadingEffect(VoidCallback action) async {
+    setState(() => isLoading = true);
+    await Future.delayed(const Duration(seconds: 2));
+    setState(() => isLoading = false);
+    action();
+  }
 
   void handleLogin() {
     final email = emailController.text.trim();
@@ -26,19 +35,21 @@ class _LoginPageState extends State<LoginPage> {
       if (email.contains("supervisor")) role = "supervisor";
       if (email.contains("admin")) role = "admin";
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Login Successful! Welcome $role."),
-          backgroundColor: const Color.fromARGB(255, 0, 0, 0),
-        ),
-      );
-
-      // ✅ Navigate to Student Dashboard after 1 second
-      Future.delayed(const Duration(seconds: 1), () {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const AdminDashboard()),
+      // Wrap the navigation in the loading effect
+      _showLoadingEffect(() {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Login Successful! Welcome $role."),
+            backgroundColor: const Color.fromARGB(255, 0, 0, 0),
+          ),
         );
+
+        Future.delayed(const Duration(seconds: 1), () {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const AdminDashboard()),
+          );
+        });
       });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -156,7 +167,8 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20), 
+                    const SizedBox(height: 20),
+
                     // 🆕 Row: Remember me checkbox + Forgot password link
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -170,17 +182,11 @@ class _LoginPageState extends State<LoginPage> {
                                   rememberMe = value ?? false;
                                 });
                               },
-                              activeColor: const Color(
-                                0xFF032540,
-                              ), // Maintain theme color
+                              activeColor: const Color(0xFF032540),
                             ),
                             const Text(
                               "Remember me",
-                              style: TextStyle(
-                                color: Color(
-                                  0xFF032540,
-                                ), // Maintain theme color
-                              ),
+                              style: TextStyle(color: Color(0xFF032540)),
                             ),
                           ],
                         ),
@@ -197,26 +203,24 @@ class _LoginPageState extends State<LoginPage> {
                           child: const Text(
                             "Forgot password?",
                             style: TextStyle(
-                              color: Color(
-                                0xFF02AEEE,
-                              ), // Use accent color for links
+                              color: Color(0xFF02AEEE),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(
-                      height: 30,
-                    ),
+                    const SizedBox(height: 30),
+
+                    // ✅ Login Button with loading effect
                     SizedBox(
                       width: 220,
                       height: 50,
                       child: ElevatedButton(
-                        onPressed: handleLogin,
+                        onPressed: isLoading ? null : handleLogin,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF032540),
-                          foregroundColor: Colors.white,
+                          foregroundColor:const Color(0xFF032540),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(50),
                           ),
@@ -226,25 +230,36 @@ class _LoginPageState extends State<LoginPage> {
                             Colors.white.withOpacity(0.2),
                           ),
                         ),
-                        child: const Text(
-                          "Login",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w200,
-                          ),
-                        ),
+                        child:
+                            isLoading
+                                ? const SizedBox(
+                                  width: 25,
+                                  height: 25,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    color: const Color(0xFF032540),
+                                  ),
+                                )
+                                : const Text(
+                                  "Login",
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w200,
+                                    color: Colors.white,
+                                  ),
+                                ),
                       ),
                     ),
+
                     const SizedBox(height: 25),
+
                     // 🆕 Don't have an account? Sign up
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const Text(
                           "Don't have an account? ",
-                          style: TextStyle(
-                            color: Color(0xFF032540),
-                          ), // Maintain theme color
+                          style: TextStyle(color: Color(0xFF032540)),
                         ),
                         TextButton(
                           onPressed: () {
@@ -258,16 +273,13 @@ class _LoginPageState extends State<LoginPage> {
                           child: const Text(
                             "Sign up",
                             style: TextStyle(
-                              color: Color(
-                                0xFF02AEEE,
-                              ), // Use accent color for links
+                              color: Color(0xFF02AEEE),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    // Removed the old "Forgot Password + Sign Up" Row to replace it with the new structure
                   ],
                 ),
               ),

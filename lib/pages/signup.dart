@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:workstudy/pages/login.dart';
-import 'package:workstudy/pages/forgot_password.dart'; // <-- Import the new page
+import 'package:workstudy/pages/forgot_password.dart';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -19,12 +19,31 @@ class _SignUpPageState extends State<SignUpPage> {
   final TextEditingController departmentController = TextEditingController();
 
   String passwordStrength = "";
-
   bool isPasswordVisible = false;
   bool isConfirmPasswordVisible = false;
+  bool isLoading = false;
 
-  void handleSignUp() {
+  // ✅ Email validation function (accepts only valid formats)
+  bool _isValidEmail(String email) {
+    final emailRegex = RegExp(
+      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+    );
+    return emailRegex.hasMatch(email);
+  }
+
+  Future<void> handleSignUp() async {
     if (_formKey.currentState!.validate()) {
+      setState(() {
+        isLoading = true;
+      });
+
+      // Simulate a short signup process
+      await Future.delayed(const Duration(seconds: 2));
+
+      setState(() {
+        isLoading = false;
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(
@@ -58,20 +77,19 @@ class _SignUpPageState extends State<SignUpPage> {
   // Password strength checker
   void checkPasswordStrength(String password) {
     String strength;
-
     final hasLetters = RegExp(r'[A-Za-z]').hasMatch(password);
     final hasNumbers = RegExp(r'[0-9]').hasMatch(password);
     final hasSpecial = RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(password);
 
     if ((hasLetters && !hasNumbers && !hasSpecial) ||
         (!hasLetters && hasNumbers && !hasSpecial)) {
-      strength = "Weak"; // only letters or only numbers
+      strength = "Weak";
     } else if (hasLetters && hasNumbers && !hasSpecial) {
-      strength = "Medium"; // letters + numbers
+      strength = "Medium";
     } else if (hasLetters && hasNumbers && hasSpecial) {
-      strength = "Strong"; // letters + numbers + special char
+      strength = "Strong";
     } else {
-      strength = "Weak"; // fallback
+      strength = "Weak";
     }
 
     setState(() {
@@ -173,7 +191,7 @@ class _SignUpPageState extends State<SignUpPage> {
                       const SizedBox(height: 16),
                     ],
 
-                    // Email
+                    // Email field
                     TextFormField(
                       controller: emailController,
                       decoration: _inputDecoration(
@@ -184,15 +202,15 @@ class _SignUpPageState extends State<SignUpPage> {
                         if (value == null || value.isEmpty) {
                           return "Enter your email";
                         }
-                        if (!value.contains("@")) {
-                          return "Email must contain '@'";
+                        if (!_isValidEmail(value.trim())) {
+                          return "Enter a valid email format";
                         }
                         return null;
                       },
                     ),
                     const SizedBox(height: 16),
 
-                    // Password with toggle
+                    // Password field
                     TextFormField(
                       controller: passwordController,
                       obscureText: !isPasswordVisible,
@@ -225,7 +243,7 @@ class _SignUpPageState extends State<SignUpPage> {
                       },
                     ),
 
-                    // Password strength indicator
+                    // Password strength
                     if (passwordStrength.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Row(
@@ -247,7 +265,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     ],
                     const SizedBox(height: 16),
 
-                    // Confirm Password with toggle
+                    // Confirm Password
                     TextFormField(
                       controller: confirmPasswordController,
                       obscureText: !isConfirmPasswordVisible,
@@ -297,33 +315,37 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Sign Up button
-                    SizedBox(
-                      width: 170,
-                      height: 50,
-                      child: ElevatedButton(
-                        onPressed: handleSignUp,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF032540),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(50),
-                          ),
-                          elevation: 0,
-                        ).copyWith(
-                          overlayColor: MaterialStateProperty.all(
-                            Colors.white.withOpacity(0.2),
+                    // Sign Up Button with loader
+                    isLoading
+                        ? const CircularProgressIndicator(
+                          color: Color(0xFF032540),
+                        )
+                        : SizedBox(
+                          width: 170,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: handleSignUp,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF032540),
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(50),
+                              ),
+                              elevation: 0,
+                            ).copyWith(
+                              overlayColor: MaterialStateProperty.all(
+                                Colors.white.withOpacity(0.2),
+                              ),
+                            ),
+                            child: const Text(
+                              "Sign Up",
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ),
-                        child: const Text(
-                          "Sign Up",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
