@@ -1,7 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart'; // ✅ This file will be generated after running `flutterfire configure`
 import 'package:workstudy/pages/login.dart';
 
-void main() {
+void main() async {
+  // ✅ Ensure Flutter is fully initialized before Firebase
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // ✅ Initialize Firebase using your platform-specific configuration
+  // If `firebase_options.dart` wasn't generated, initialize without explicit options.
+  await Firebase.initializeApp();
+
+  // ✅ Now safely run your app
   runApp(const WorkStudyApp());
 }
 
@@ -67,19 +77,17 @@ class LandingPage extends StatelessWidget {
               ),
             ),
 
-            // 🔹 Hero Section (Centered)
+            // 🔹 Hero Section
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Illustration Placeholder (can add asset later)
                   Icon(
                     Icons.school_rounded,
                     size: size.width * 0.3,
                     color: Colors.white.withOpacity(0.9),
                   ),
                   const SizedBox(height: 30),
-
                   Text(
                     "Track. Approve. Succeed.",
                     style: TextStyle(
@@ -90,9 +98,7 @@ class LandingPage extends StatelessWidget {
                     ),
                     textAlign: TextAlign.center,
                   ),
-
                   const SizedBox(height: 15),
-
                   Text(
                     "Seamless work-study management.",
                     style: TextStyle(
