@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:workstudy/pages/admindashboard.dart';
+import 'package:workstudy/pages/supervisordashboard.dart';
 import 'signup.dart'; // Sign Up page
 import 'forgot_password.dart'; // Forgot Password page
 import 'StudentDashboard.dart'; // Student Dashboard page
@@ -47,7 +48,7 @@ class _LoginPageState extends State<LoginPage> {
         Future.delayed(const Duration(seconds: 1), () {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => const AdminDashboard()),
+            MaterialPageRoute(builder: (context) => const SupervisorDashboard()),
           );
         });
       });
@@ -186,7 +187,7 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             const Text(
                               "Remember me",
-                              style: TextStyle(color: Color(0xFF032540)),
+                              style: TextStyle(color: Color(0xFF03254)),
                             ),
                           ],
                         ),

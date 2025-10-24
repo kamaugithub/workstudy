@@ -4,14 +4,8 @@ import 'firebase_options.dart'; // ✅ This file will be generated after running
 import 'package:workstudy/pages/login.dart';
 
 void main() async {
-  // ✅ Ensure Flutter is fully initialized before Firebase
   WidgetsFlutterBinding.ensureInitialized();
-
-  // ✅ Initialize Firebase using your platform-specific configuration
-  // If `firebase_options.dart` wasn't generated, initialize without explicit options.
-  await Firebase.initializeApp();
-
-  // ✅ Now safely run your app
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const WorkStudyApp());
 }
 

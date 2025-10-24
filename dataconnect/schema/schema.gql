@@ -1,0 +1,56 @@
+type User @table {
+  email: String!
+  passwordHash: String!
+  displayName: String!
+  userType: UserType!
+  createdAt: Timestamp!
+  department: Department
+}
+
+type Department @table {
+  name: String!
+  createdAt: Timestamp!
+  description: String
+}
+
+type TimeEntry @table {
+  student: User!
+  clockInTime: Timestamp!
+  status: TimeEntryStatus!
+  createdAt: Timestamp!
+  clockOutTime: Timestamp
+  comments: String
+  approvalNotes: String
+  supervisor: User
+}
+
+type Approval @table {
+  timeEntry: TimeEntry!
+  supervisor: User!
+  status: ApprovalStatus!
+  approvalDate: Timestamp!
+  notes: String
+}
+
+type UserDepartment @table(key: ["student", "department"]) {
+  student: User!
+  department: Department!
+  createdAt: Timestamp!
+}
+
+enum UserType {
+  ADMIN
+  SUPERVISOR
+  STUDENT
+}
+
+enum TimeEntryStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+enum ApprovalStatus {
+  APPROVED
+  DECLINED
+}

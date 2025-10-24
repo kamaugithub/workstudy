@@ -39,7 +39,7 @@ dependencies:
   # ✅ File picker for selecting export locations
   file_picker: ^8.0.0
     # Firebase core (must be first)
-  firebase_core: ^3.5.0
+  firebase_core: ^3.15.2
 
   # Firebase authentication (for login/signup)
   firebase_auth: ^5.3.0

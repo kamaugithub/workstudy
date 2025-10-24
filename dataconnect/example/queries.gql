@@ -1,0 +1,37 @@
+mutation CreateDepartment @auth(level: USER) {
+  department_insert(data: {
+    name: "Example Department",
+    description: "An example department",
+    createdAt_expr: "request.time"
+  })
+}
+
+query ListDepartments @auth(level: PUBLIC, insecureReason: "This operation is safe to expose to the public") {
+  departments {
+    id
+    name
+    description
+  }
+}
+
+mutation UpdateTimeEntry($id: UUID!, $comments: String) @auth(level: USER) {
+  timeEntry_update(
+    id: $id,
+    data: {
+      comments: $comments
+    }
+  )
+}
+
+query GetTimeEntry($id: UUID!) @auth(level: USER) {
+  timeEntry(id: $id) {
+    id
+    student {
+      id
+      displayName
+    }
+    clockInTime
+    clockOutTime
+    status
+  }
+}

@@ -4,7 +4,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services") 
 }
+dependencies {
+  // Import the Firebase BoM
+  implementation(platform("com.google.firebase:firebase-bom:34.4.0"))
 
+
+ 
+  // https://firebase.google.com/docs/android/setup#available-libraries
+}
 
 android {
     namespace = "com.example.workstudy"
