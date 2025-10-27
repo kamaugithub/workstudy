@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:workstudy/pages/login.dart';
 import 'package:workstudy/pages/forgot_password.dart';
 
@@ -14,8 +16,7 @@ class _SignUpPageState extends State<SignUpPage> {
   String? selectedRole;
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
-  final TextEditingController confirmPasswordController =
-      TextEditingController();
+  final TextEditingController confirmPasswordController = TextEditingController();
   final TextEditingController departmentController = TextEditingController();
 
   String passwordStrength = "";
@@ -23,7 +24,10 @@ class _SignUpPageState extends State<SignUpPage> {
   bool isConfirmPasswordVisible = false;
   bool isLoading = false;
 
-  // ✅ Email validation function (accepts only valid formats)
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // ✅ Email validation
   bool _isValidEmail(String email) {
     final emailRegex = RegExp(
       r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
@@ -31,42 +35,88 @@ class _SignUpPageState extends State<SignUpPage> {
     return emailRegex.hasMatch(email);
   }
 
+  // ✅ Handle Signup (updated)
   Future<void> handleSignUp() async {
     if (_formKey.currentState!.validate()) {
-      setState(() {
-        isLoading = true;
-      });
+      setState(() => isLoading = true);
 
-      // Simulate a short signup process
-      await Future.delayed(const Duration(seconds: 2));
+      try {
+        // Create user in Firebase Auth
+        UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+          email: emailController.text.trim(),
+          password: passwordController.text.trim(),
+        );
 
-      setState(() {
-        isLoading = false;
-      });
+        // ✅ Safely handle optional fields
+        final userData = {
+          'email': emailController.text.trim(),
+          'role': selectedRole ?? 'Unknown', // Prevent null crash
+          'createdAt': FieldValue.serverTimestamp(),
+        };
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            "Account Created Successfully",
-            textAlign: TextAlign.center,
+        // Include department only if provided
+        final department = departmentController.text.trim();
+        if (department.isNotEmpty) {
+          userData['department'] = department;
+        }
+
+        // ✅ Save user data to Firestore
+        await _firestore
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .set(userData);
+
+        // ✅ Success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("Account Created Successfully"),
+              behavior: SnackBarBehavior.floating,
+              margin: const EdgeInsets.symmetric(horizontal: 55, vertical: 20),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              duration: const Duration(seconds: 2),
+              backgroundColor: const Color(0xFF032540),
+            ),
+          );
+
+          // ✅ Navigate safely
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginPage()),
+          );
+        }
+      } on FirebaseAuthException catch (e) {
+        String message;
+        if (e.code == 'email-already-in-use') {
+          message = "This email is already registered.";
+        } else if (e.code == 'weak-password') {
+          message = "Your password is too weak.";
+        } else if (e.code == 'invalid-email') {
+          message = "Invalid email address.";
+        } else {
+          message = "Signup failed. Please try again.";
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.red),
+        );
+      } catch (e) {
+        print("Signup error: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("An unexpected error occurred: $e"),
+            backgroundColor: Colors.red,
           ),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.symmetric(horizontal: 55, vertical: 20),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          duration: const Duration(seconds: 2),
-          backgroundColor: const Color(0xFF032540),
-        ),
-      );
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginPage()),
-      );
+        );
+      } finally {
+        setState(() => isLoading = false);
+      }
     }
   }
 
+  // ✅ Navigate to Forgot Password
   void handleForgotPassword() {
     Navigator.push(
       context,
@@ -74,7 +124,7 @@ class _SignUpPageState extends State<SignUpPage> {
     );
   }
 
-  // Password strength checker
+  // ✅ Password strength checker
   void checkPasswordStrength(String password) {
     String strength;
     final hasLetters = RegExp(r'[A-Za-z]').hasMatch(password);
@@ -92,9 +142,7 @@ class _SignUpPageState extends State<SignUpPage> {
       strength = "Weak";
     }
 
-    setState(() {
-      passwordStrength = strength;
-    });
+    setState(() => passwordStrength = strength);
   }
 
   InputDecoration _inputDecoration(
@@ -162,34 +210,27 @@ class _SignUpPageState extends State<SignUpPage> {
                           child: Text("Student"),
                         ),
                       ],
-                      onChanged: (value) {
-                        setState(() {
-                          selectedRole = value;
-                        });
-                      },
-                      validator:
-                          (value) =>
-                              value == null ? "Please select a role" : null,
+                      onChanged: (value) => setState(() => selectedRole = value),
+                      validator: (value) =>
+                          value == null ? "Please select a role" : null,
                     ),
                     const SizedBox(height: 16),
 
-                    if (selectedRole == "Supervisor") ...[
-                      TextFormField(
-                        controller: departmentController,
-                        decoration: _inputDecoration(
-                          "Department",
-                          hint: "Enter your department name",
-                        ),
-                        validator: (value) {
-                          if (selectedRole == "Supervisor" &&
-                              (value == null || value.isEmpty)) {
-                            return "Please enter your department";
-                          }
-                          return null;
-                        },
+                    // Department field
+                    TextFormField(
+                      controller: departmentController,
+                      decoration: _inputDecoration(
+                        "Department",
+                        hint: "Enter your department name",
                       ),
-                      const SizedBox(height: 16),
-                    ],
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return "Please enter your department";
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
 
                     // Email field
                     TextFormField(
@@ -225,11 +266,9 @@ class _SignUpPageState extends State<SignUpPage> {
                                 : Icons.visibility_off,
                             color: const Color(0xFF032540),
                           ),
-                          onPressed: () {
-                            setState(() {
-                              isPasswordVisible = !isPasswordVisible;
-                            });
-                          },
+                          onPressed: () => setState(
+                            () => isPasswordVisible = !isPasswordVisible,
+                          ),
                         ),
                       ),
                       validator: (value) {
@@ -243,7 +282,6 @@ class _SignUpPageState extends State<SignUpPage> {
                       },
                     ),
 
-                    // Password strength
                     if (passwordStrength.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Row(
@@ -252,10 +290,9 @@ class _SignUpPageState extends State<SignUpPage> {
                             "Strength: $passwordStrength",
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              color:
-                                  passwordStrength == "Weak"
-                                      ? Colors.red
-                                      : passwordStrength == "Medium"
+                              color: passwordStrength == "Weak"
+                                  ? Colors.red
+                                  : passwordStrength == "Medium"
                                       ? Colors.orange
                                       : Colors.green,
                             ),
@@ -279,12 +316,9 @@ class _SignUpPageState extends State<SignUpPage> {
                                 : Icons.visibility_off,
                             color: const Color(0xFF032540),
                           ),
-                          onPressed: () {
-                            setState(() {
-                              isConfirmPasswordVisible =
-                                  !isConfirmPasswordVisible;
-                            });
-                          },
+                          onPressed: () => setState(() {
+                            isConfirmPasswordVisible = !isConfirmPasswordVisible;
+                          }),
                         ),
                       ),
                       validator: (value) {
@@ -299,7 +333,6 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Forgot Password
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
@@ -315,37 +348,37 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Sign Up Button with loader
+                    // ✅ Sign Up Button
                     isLoading
                         ? const CircularProgressIndicator(
-                          color: Color(0xFF032540),
-                        )
+                            color: Color(0xFF032540),
+                          )
                         : SizedBox(
-                          width: 170,
-                          height: 50,
-                          child: ElevatedButton(
-                            onPressed: handleSignUp,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF032540),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(50),
+                            width: 170,
+                            height: 50,
+                            child: ElevatedButton(
+                              onPressed: handleSignUp,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF032540),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(50),
+                                ),
+                                elevation: 0,
+                              ).copyWith(
+                                overlayColor: MaterialStateProperty.all(
+                                  Colors.white.withOpacity(0.2),
+                                ),
                               ),
-                              elevation: 0,
-                            ).copyWith(
-                              overlayColor: MaterialStateProperty.all(
-                                Colors.white.withOpacity(0.2),
-                              ),
-                            ),
-                            child: const Text(
-                              "Sign Up",
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
+                              child: const Text(
+                                "Sign Up",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
-                        ),
                   ],
                 ),
               ),
