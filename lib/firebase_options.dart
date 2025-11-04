@@ -23,37 +23,37 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: "YOUR_WEB_API_KEY",
-    appId: "YOUR_WEB_APP_ID",
-    messagingSenderId: "YOUR_SENDER_ID",
-    projectId: "YOUR_PROJECT_ID",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    apiKey: "AIzaSyDTSQK6ZAkEzcIww00psqb3kL3xZzLtmIA",
+    appId: "1:195880451791:web:ecadf9a81437e1db23c1ba",
+    messagingSenderId: "195880451791",
+    projectId: "workstudy-bcda5",
+    authDomain: "workstudy-bcda5.firebaseapp.com",
+    storageBucket: "workstudy-bcda5.firebasestorage.app",
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: "YOUR_ANDROID_API_KEY",
-    appId: "YOUR_ANDROID_APP_ID",
-    messagingSenderId: "YOUR_SENDER_ID",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    apiKey: "AIzaSyDTSQK6ZAkEzcIww00psqb3kL3xZzLtmIA",
+    appId: "1:195880451791:android:ecadf9a81437e1db23c1ba",
+    messagingSenderId: "195880451791",
+    projectId: "workstudy-bcda5",
+    storageBucket: "workstudy-bcda5.firebasestorage.app",
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: "YOUR_IOS_API_KEY",
-    appId: "YOUR_IOS_APP_ID",
-    messagingSenderId: "YOUR_SENDER_ID",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    apiKey: "AIzaSyDTSQK6ZAkEzcIww00psqb3kL3xZzLtmIA",
+    appId: "1:195880451791:ios:ecadf9a81437e1db23c1ba",
+    messagingSenderId: "195880451791",
+    projectId: "workstudy-bcda5",
+    storageBucket: "workstudy-bcda5.firebasestorage.app",
     iosBundleId: "com.example.workstudy",
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: "YOUR_IOS_API_KEY",
-    appId: "YOUR_IOS_APP_ID",
-    messagingSenderId: "YOUR_SENDER_ID",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    apiKey: "AIzaSyDTSQK6ZAkEzcIww00psqb3kL3xZzLtmIA",
+    appId: "1:195880451791:ios:ecadf9a81437e1db23c1ba",
+    messagingSenderId: "195880451791",
+    projectId: "workstudy-bcda5",
+    storageBucket: "workstudy-bcda5.firebasestorage.app",
     iosBundleId: "com.example.workstudy",
   );
 }
