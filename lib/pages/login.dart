@@ -43,19 +43,38 @@ class _LoginPageState extends State<LoginPage> {
       UserCredential userCredential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
 
-      // 2️⃣ Get user data from Firestore
-      DocumentSnapshot snapshot =
+      // 2️⃣ Try getting user data from Firestore (hybrid lookup)
+      DocumentSnapshot doc =
           await FirebaseFirestore.instance
               .collection('users')
               .doc(userCredential.user!.uid)
               .get();
 
-      if (!snapshot.exists) {
-        throw Exception("User data not found");
-      }
+      // 🔍 If document doesn't exist, try finding it by email
+      QuerySnapshot emailQuery =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .where('email', isEqualTo: email)
+              .limit(1)
+              .get();
 
-      // 3️⃣ Get and normalize role
-      String role = snapshot['role'].toString().toLowerCase();
+      String role;
+
+      if (!doc.exists && emailQuery.docs.isEmpty) {
+        // 🧩 Automatically create admin document if not found
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .set({'email': email, 'role': 'admin', 'name': 'Admin User'});
+
+        role = 'admin';
+      } else {
+        final userData =
+            doc.exists
+                ? doc.data() as Map<String, dynamic>
+                : emailQuery.docs.first.data() as Map<String, dynamic>;
+        role = userData['role'].toString().toLowerCase();
+      }
 
       setState(() => isLoading = false);
 

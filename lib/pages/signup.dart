@@ -14,12 +14,12 @@ class SignUpPage extends StatefulWidget {
 class _SignUpPageState extends State<SignUpPage> {
   final _formKey = GlobalKey<FormState>();
   String? selectedRole;
+  String? selectedDepartment;
 
   final idController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
-  final departmentController = TextEditingController();
 
   String passwordStrength = "";
   bool isPasswordVisible = false;
@@ -28,6 +28,18 @@ class _SignUpPageState extends State<SignUpPage> {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  final List<String> departments = [
+    "IT",
+    "HR",
+    "Corporate Affairs",
+    "D.C.F",
+    "DC3",
+    "Library",
+    "Sports",
+    "Transport",
+    "Kitchen",
+  ];
 
   bool _isValidEmail(String email) {
     final emailRegex = RegExp(
@@ -44,7 +56,7 @@ class _SignUpPageState extends State<SignUpPage> {
       final email = emailController.text.trim();
       final idNumber = idController.text.trim();
       final password = passwordController.text.trim();
-      final department = departmentController.text.trim();
+      final department = selectedDepartment ?? "Unknown";
       final role = selectedRole ?? 'Unknown';
 
       // Check if ID already exists
@@ -239,19 +251,27 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Department
-                    TextFormField(
-                      controller: departmentController,
-                      decoration: _inputDecoration(
-                        "Department",
-                        hint: "Enter your department name",
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return "Please enter your department";
-                        }
-                        return null;
+                    // ✅ Department Dropdown
+                    DropdownButtonFormField<String>(
+                      value: selectedDepartment,
+                      decoration: _inputDecoration("Department"),
+                      items:
+                          departments.map((dept) {
+                            return DropdownMenuItem(
+                              value: dept,
+                              child: Text(dept),
+                            );
+                          }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          selectedDepartment = value;
+                        });
                       },
+                      validator:
+                          (value) =>
+                              value == null
+                                  ? "Please select your department"
+                                  : null,
                     ),
                     const SizedBox(height: 16),
 
@@ -281,14 +301,12 @@ class _SignUpPageState extends State<SignUpPage> {
                         "Unique  Number",
                         hint: "Enter assigned ID (e.g. 21-03008 or 45/456)",
                       ),
-                      keyboardType:
-                          TextInputType.text, // Use text to allow -, /
+                      keyboardType: TextInputType.text, // allows -, /
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return "Enter your assigned  number";
+                          return "Enter your assigned number";
                         }
 
-                        // ✅ Allow only digits, dashes (-), and slashes (/)
                         if (!RegExp(r'^[0-9\-/]+$').hasMatch(value)) {
                           return "ID must contain only numbers, dashes (-), or slashes (/)";
                         }
