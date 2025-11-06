@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:workstudy/pages/admindashboard.dart';
 import 'package:workstudy/pages/supervisordashboard.dart';
-import 'signup.dart'; // Sign Up page
-import 'forgot_password.dart'; // Forgot Password page
-import 'StudentDashboard.dart'; // Student Dashboard page
+import 'package:workstudy/pages/StudentDashboard.dart';
+import 'signup.dart';
+import 'forgot_password.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -16,50 +19,88 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool showPassword = false;
-  bool rememberMe = false; // Added for the "Remember me" checkbox
-  bool isLoading = false; // Added to support loading effect
+  bool isLoading = false;
 
-  // ✅ Added loading effect function
-  Future<void> _showLoadingEffect(VoidCallback action) async {
-    setState(() => isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
-    setState(() => isLoading = false);
-    action();
-  }
-
-  void handleLogin() {
+  /// ✅ Handles login logic
+  Future<void> handleLogin() async {
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
-    if (email.isNotEmpty && password.isNotEmpty) {
-      String role = "student";
-      if (email.contains("supervisor")) role = "supervisor";
-      if (email.contains("admin")) role = "admin";
-
-      // Wrap the navigation in the loading effect
-      _showLoadingEffect(() {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Login Successful! Welcome $role."),
-            backgroundColor: const Color.fromARGB(255, 0, 0, 0),
-          ),
-        );
-
-        Future.delayed(const Duration(seconds: 1), () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const SupervisorDashboard()),
-          );
-        });
-      });
-    } else {
+    if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Please enter both email and password"),
           backgroundColor: Colors.red,
         ),
       );
+      return;
     }
+
+    try {
+      setState(() => isLoading = true);
+
+      // 1️⃣ Sign in with Firebase Authentication
+      UserCredential userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+
+      // 2️⃣ Get user data from Firestore
+      DocumentSnapshot snapshot =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userCredential.user!.uid)
+              .get();
+
+      if (!snapshot.exists) {
+        throw Exception("User data not found");
+      }
+
+      // 3️⃣ Get and normalize role
+      String role = snapshot['role'].toString().toLowerCase();
+
+      setState(() => isLoading = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Login Successful! Welcome $role."),
+          backgroundColor: const Color.fromARGB(255, 0, 0, 0),
+        ),
+      );
+
+      Future.delayed(const Duration(seconds: 1), () {
+        _navigateToDashboard(role);
+      });
+    } on FirebaseAuthException catch (e) {
+      setState(() => isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message ?? "Login failed. Please try again."),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } catch (e) {
+      setState(() => isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  /// ✅ Redirect user based on role
+  void _navigateToDashboard(String role) {
+    Widget targetPage;
+
+    if (role == "admin") {
+      targetPage = const AdminDashboard();
+    } else if (role == "supervisor") {
+      targetPage = const SupervisorDashboard();
+    } else {
+      targetPage = const StudentDashboard();
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => targetPage),
+    );
   }
 
   @override
@@ -99,7 +140,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 30),
 
-                    // Email
+                    // Email Field
                     TextField(
                       controller: emailController,
                       decoration: InputDecoration(
@@ -128,7 +169,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Password
+                    // Password Field
                     TextField(
                       controller: passwordController,
                       obscureText: !showPassword,
@@ -170,50 +211,30 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // 🆕 Row: Remember me checkbox + Forgot password link
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: rememberMe,
-                              onChanged: (value) {
-                                setState(() {
-                                  rememberMe = value ?? false;
-                                });
-                              },
-                              activeColor: const Color(0xFF032540),
+                    // Forgot password
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const ForgotPasswordPage(),
                             ),
-                            const Text(
-                              "Remember me",
-                              style: TextStyle(color: Color(0xFF03254)),
-                            ),
-                          ],
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder:
-                                    (context) => const ForgotPasswordPage(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            "Forgot password?",
-                            style: TextStyle(
-                              color: Color(0xFF02AEEE),
-                              fontWeight: FontWeight.w500,
-                            ),
+                          );
+                        },
+                        child: const Text(
+                          "Forgot password?",
+                          style: TextStyle(
+                            color: Color(0xFF02AEEE),
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 30),
 
-                    // ✅ Login Button with loading effect
+                    // Login Button
                     SizedBox(
                       width: 220,
                       height: 50,
@@ -221,7 +242,6 @@ class _LoginPageState extends State<LoginPage> {
                         onPressed: isLoading ? null : handleLogin,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF032540),
-                          foregroundColor:const Color(0xFF032540),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(50),
                           ),
@@ -238,7 +258,7 @@ class _LoginPageState extends State<LoginPage> {
                                   height: 25,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 3,
-                                    color: const Color(0xFF032540),
+                                    color: Colors.white,
                                   ),
                                 )
                                 : const Text(
@@ -251,10 +271,9 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                       ),
                     ),
-
                     const SizedBox(height: 25),
 
-                    // 🆕 Don't have an account? Sign up
+                    // Sign Up
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [

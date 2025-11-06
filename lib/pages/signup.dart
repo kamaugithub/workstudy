@@ -15,6 +15,7 @@ class _SignUpPageState extends State<SignUpPage> {
   final _formKey = GlobalKey<FormState>();
   String? selectedRole;
 
+  final idController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
@@ -28,7 +29,6 @@ class _SignUpPageState extends State<SignUpPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // ✅ Validate email format
   bool _isValidEmail(String email) {
     final emailRegex = RegExp(
       r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
@@ -36,59 +36,60 @@ class _SignUpPageState extends State<SignUpPage> {
     return emailRegex.hasMatch(email);
   }
 
-  // ✅ Handle user signup
   Future<void> handleSignUp() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() => isLoading = true);
 
-    // Debug print to ensure controllers are not empty
-    print('Email entered: ${emailController.text}');
-    print('Password entered: ${passwordController.text}');
-    print('Role selected: $selectedRole');
-    print('Department: ${departmentController.text}');
-
-    // Safety check
-    if (emailController.text.trim().isEmpty ||
-        passwordController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please fill in all required fields."),
-          backgroundColor: Colors.red,
-        ),
-      );
-      setState(() => isLoading = false);
-      return;
-    }
-
     try {
-      // 1️⃣ Create the user in Firebase Authentication
-      UserCredential userCredential = await _auth
-          .createUserWithEmailAndPassword(
-            email: emailController.text.trim(),
-            password: passwordController.text.trim(),
-          );
+      final email = emailController.text.trim();
+      final idNumber = idController.text.trim();
+      final password = passwordController.text.trim();
+      final department = departmentController.text.trim();
+      final role = selectedRole ?? 'Unknown';
 
-      // 2️⃣ Prepare user data for Firestore
+      // Check if ID already exists
+      final existing =
+          await _firestore
+              .collection('users')
+              .where('idNumber', isEqualTo: idNumber)
+              .get();
+
+      if (existing.docs.isNotEmpty) {
+        setState(() => isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("This ID number is already registered."),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Create Firebase user
+      final userCred = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      // Prepare user data
       final userData = {
-        'email': emailController.text.trim(),
-        'role': selectedRole ?? 'Unknown',
+        'email': email,
+        'idNumber': idNumber,
+        'role': role,
+        'department': department,
         'createdAt': FieldValue.serverTimestamp(),
+        'weeklyHours': 0,
+        'totalHours': 0,
+        'status': 'active',
       };
 
-      final department = departmentController.text.trim();
-      if (department.isNotEmpty) userData['department'] = department;
-
-      // 3️⃣ Store data in Firestore under users collection
+      // Save to Firestore
       await _firestore
           .collection('users')
-          .doc(userCredential.user!.uid)
+          .doc(userCred.user!.uid)
           .set(userData);
 
-      // ✅ Debugging confirmation
-      print("User created and saved successfully in Firestore!");
-
-      // 4️⃣ Show success message
+      // Success message + redirect
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -103,14 +104,12 @@ class _SignUpPageState extends State<SignUpPage> {
           ),
         );
 
-        // 5️⃣ Navigate to login page
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const LoginPage()),
         );
       }
     } on FirebaseAuthException catch (e) {
-      // ✅ Handle Firebase-specific errors
       String message;
       switch (e.code) {
         case 'email-already-in-use':
@@ -125,15 +124,10 @@ class _SignUpPageState extends State<SignUpPage> {
         default:
           message = "Signup failed: ${e.message}";
       }
-
-      print("FirebaseAuthException: ${e.code} - ${e.message}");
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
     } catch (e) {
-      // ✅ Catch unexpected errors
-      print("Unexpected signup error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Unexpected error: ${e.toString()}"),
@@ -145,7 +139,6 @@ class _SignUpPageState extends State<SignUpPage> {
     }
   }
 
-  // ✅ Forgot Password Navigation
   void handleForgotPassword() {
     Navigator.push(
       context,
@@ -153,7 +146,6 @@ class _SignUpPageState extends State<SignUpPage> {
     );
   }
 
-  // ✅ Password strength checker
   void checkPasswordStrength(String password) {
     String strength;
     final hasLetters = RegExp(r'[A-Za-z]').hasMatch(password);
@@ -170,7 +162,6 @@ class _SignUpPageState extends State<SignUpPage> {
     } else {
       strength = "Weak";
     }
-
     setState(() => passwordStrength = strength);
   }
 
@@ -203,6 +194,7 @@ class _SignUpPageState extends State<SignUpPage> {
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
+          physics: const BouncingScrollPhysics(),
           child: Card(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
@@ -225,7 +217,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Role dropdown
+                    // Role Dropdown
                     DropdownButtonFormField<String>(
                       value: selectedRole,
                       decoration: _inputDecoration("Select Role"),
@@ -247,7 +239,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Department field
+                    // Department
                     TextFormField(
                       controller: departmentController,
                       decoration: _inputDecoration(
@@ -263,7 +255,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Email field
+                    // Email
                     TextFormField(
                       controller: emailController,
                       decoration: _inputDecoration(
@@ -282,7 +274,31 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Password field
+                    // ✅ ID Number Field (Manual numeric)
+                    TextFormField(
+                      controller: idController,
+                      decoration: _inputDecoration(
+                        "Unique  Number",
+                        hint: "Enter assigned ID (e.g. 21-03008 or 45/456)",
+                      ),
+                      keyboardType:
+                          TextInputType.text, // Use text to allow -, /
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return "Enter your assigned  number";
+                        }
+
+                        // ✅ Allow only digits, dashes (-), and slashes (/)
+                        if (!RegExp(r'^[0-9\-/]+$').hasMatch(value)) {
+                          return "ID must contain only numbers, dashes (-), or slashes (/)";
+                        }
+
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Password
                     TextFormField(
                       controller: passwordController,
                       obscureText: !isPasswordVisible,
@@ -383,7 +399,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 12),
 
-                    // ✅ Sign Up Button
+                    // Submit Button
                     isLoading
                         ? const CircularProgressIndicator(
                           color: Color(0xFF032540),
