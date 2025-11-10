@@ -298,13 +298,13 @@ class _SignUpPageState extends State<SignUpPage> {
                     TextFormField(
                       controller: idController,
                       decoration: _inputDecoration(
-                        "Unique  Number",
-                        hint: "Enter assigned ID (e.g. 21-03008 or 45/456)",
+                        "ID  Number",
+                        hint: "Enter assigned ID number(e.g. 21-03008 or 45/456)",
                       ),
                       keyboardType: TextInputType.text, // allows -, /
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return "Enter your assigned number";
+                          return "Enter your ID number";
                         }
 
                         if (!RegExp(r'^[0-9\-/]+$').hasMatch(value)) {

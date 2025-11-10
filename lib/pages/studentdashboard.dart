@@ -1,18 +1,15 @@
 import 'dart:async';
-import 'dart:typed_data'; // New: Added for handling byte lists
+import 'dart:typed_data';
+import 'package:workstudy/export_helper/firestore_helper.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart'
-    show kIsWeb; // New: To check if running on web
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as excel;
 import 'package:pdf/widgets.dart' as pw;
-import 'package:pdf/pdf.dart';
-import 'package:printing/printing.dart';
-import 'package:workstudy/export_helper/save_file_other.dart';
-// REMOVED: import 'dart:io'; (Not supported on web)
-// REMOVED: import 'package:path_provider/path_provider.dart'; (Handled in helper)
 
-// ✅ Conditional import: This line imports the correct file system logic for the platform
+import 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/export_helper/save_file_web.dart'
     if (dart.library.io) 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/pages/login.dart';
@@ -31,33 +28,13 @@ class _StudentDashboardState extends State<StudentDashboard>
   String comment = "";
   late Timer timer;
   DateTime startTime = DateTime.now();
-  // ✅ FIX: Moved selectedTab to the State class to manage its state correctly
   String selectedActivityTab = 'pending';
 
-  final String studentName = "John Stone";
-  final double totalHoursWorked = 48.5;
-  final double thisWeekHours = 12.5;
+  String studentName = "";
+  double totalHoursWorked = 0.0;
+  double thisWeekHours = 0.0;
 
-  final List<Map<String, dynamic>> recentActivities = [
-    {
-      "date": "2024-01-15",
-      "hours": 4,
-      "status": "approved",
-      "description": "Library cataloging",
-    },
-    {
-      "date": "2024-01-14",
-      "hours": 3.5,
-      "status": "pending",
-      "description": "Computer lab maintenance",
-    },
-    {
-      "date": "2024-01-12",
-      "hours": 5,
-      "status": "declined",
-      "description": "Student registration assistance",
-    },
-  ];
+  List<Map<String, dynamic>> recentActivities = [];
 
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
@@ -77,6 +54,9 @@ class _StudentDashboardState extends State<StudentDashboard>
     _verticalMovement = Tween<double>(begin: -2, end: 2).animate(
       CurvedAnimation(parent: _titleController, curve: Curves.easeInOut),
     );
+
+    _loadStudentData();
+    _loadRecentActivities();
   }
 
   @override
@@ -84,6 +64,81 @@ class _StudentDashboardState extends State<StudentDashboard>
     _titleController.dispose();
     if (timer.isActive) timer.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadStudentData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final doc =
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+    if (!doc.exists) return;
+
+    final data = doc.data()!;
+    setState(() {
+      studentName = data['name'] ?? "Student";
+    });
+
+    // Calculate totals from work_sessions collection
+    final sessionsQuery =
+        await FirebaseFirestore.instance
+            .collection('work_sessions')
+            .where('studentId', isEqualTo: user.uid)
+            .get();
+
+    double total = 0.0;
+    double weekTotal = 0.0;
+    final now = DateTime.now();
+
+    for (var session in sessionsQuery.docs) {
+      final hoursStr = session['hours'] ?? "00:00:00";
+      final parts = hoursStr.split(":");
+      double hours = 0;
+      if (parts.length == 3) {
+        hours =
+            int.parse(parts[0]) +
+            int.parse(parts[1]) / 60 +
+            int.parse(parts[2]) / 3600;
+      }
+      total += hours;
+
+      final date = DateTime.tryParse(session['date'] ?? "") ?? now;
+      if (date.isAfter(now.subtract(const Duration(days: 7)))) {
+        weekTotal += hours;
+      }
+    }
+
+    setState(() {
+      totalHoursWorked = total;
+      thisWeekHours = weekTotal;
+    });
+  }
+
+  Future<void> _loadRecentActivities() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final query =
+        await FirebaseFirestore.instance
+            .collection('work_sessions')
+            .where('studentId', isEqualTo: user.uid)
+            .orderBy('timestamp', descending: true)
+            .get();
+
+    setState(() {
+      recentActivities =
+          query.docs.map((doc) {
+            return {
+              "date": doc['date'] ?? '',
+              "hours": doc['hours'] ?? '',
+              "status": doc['status'] ?? '',
+              "description": doc['description'] ?? '',
+            };
+          }).toList();
+    });
   }
 
   void handleClockIn() {
@@ -124,7 +179,7 @@ class _StudentDashboardState extends State<StudentDashboard>
     return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
   }
 
-  void handleSubmitHours() {
+  Future<void> handleSubmitHours() async {
     if (comment.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -133,19 +188,73 @@ class _StudentDashboardState extends State<StudentDashboard>
       );
       return;
     }
-    setState(() => comment = "");
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Hours Submitted for Supervisor Approval.")),
-    );
-    // Here you can send workedTime, startTime, and description to the supervisor
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final studentDoc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+      if (!studentDoc.exists) return;
+      final department = studentDoc['department'];
+
+      final supervisorQuery =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .where('role', isEqualTo: 'supervisor')
+              .where('department', isEqualTo: department)
+              .limit(1)
+              .get();
+
+      if (supervisorQuery.docs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("No supervisor found for your department."),
+          ),
+        );
+        return;
+      }
+
+      final supervisorId = supervisorQuery.docs.first.id;
+
+      await FirebaseFirestore.instance.collection('work_sessions').add({
+        'studentId': user.uid,
+        'supervisorId': supervisorId,
+        'department': department,
+        'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        'hours': currentSessionDuration,
+        'description': comment.trim(),
+        'status': 'pending',
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      setState(() {
+        comment = "";
+        isSessionActive = false;
+        currentSessionDuration = "00:00:00";
+      });
+      if (timer.isActive) timer.cancel();
+      _loadRecentActivities();
+      _loadStudentData();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Hours submitted for supervisor approval."),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error submitting hours: $e")));
+    }
   }
 
-  // 🔄 UPDATED: EXPORT EXCEL (Now works on Web and Mobile/Desktop)
   Future<void> exportExcel() async {
     final workbook = excel.Excel.createExcel();
     final sheet = workbook['Report'];
-
-    // Add header row (must use CellValue objects)
     sheet.appendRow([
       excel.TextCellValue("Date"),
       excel.TextCellValue("Hours"),
@@ -153,7 +262,6 @@ class _StudentDashboardState extends State<StudentDashboard>
       excel.TextCellValue("Description"),
     ]);
 
-    // Add data rows
     for (var activity in recentActivities) {
       sheet.appendRow([
         excel.TextCellValue(activity["date"] ?? ''),
@@ -170,11 +278,9 @@ class _StudentDashboardState extends State<StudentDashboard>
     String message;
 
     if (kIsWeb) {
-      // 🌐 Web: Triggers a browser download using saveFileWeb helper
       saveFileWeb(Uint8List.fromList(bytes), fileName);
       message = "✅ Excel file download initiated.";
     } else {
-      // 📱 Desktop/Mobile: Writes to the device's file system using saveFileOther helper
       final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
       message = "✅ Excel exported to: $path";
     }
@@ -184,7 +290,6 @@ class _StudentDashboardState extends State<StudentDashboard>
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // 🔄 UPDATED: EXPORT PDF (Now works on Web and Mobile/Desktop)
   Future<void> exportPDF() async {
     final pdf = pw.Document();
     pdf.addPage(
@@ -223,11 +328,9 @@ class _StudentDashboardState extends State<StudentDashboard>
     String message;
 
     if (kIsWeb) {
-      // 🌐 Web: Triggers a browser download using saveFileWeb helper
       saveFileWeb(bytes, fileName);
       message = "✅ PDF file download initiated.";
     } else {
-      // 📱 Desktop/Mobile: Writes to the device's file system using saveFileOther helper
       final path = await saveFileOther(bytes, fileName);
       message = "✅ PDF exported to: $path";
     }
@@ -247,7 +350,6 @@ class _StudentDashboardState extends State<StudentDashboard>
       body: SafeArea(
         child: Column(
           children: [
-            // 🔹 Fixed Animated Header
             Container(
               height: 70,
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -266,23 +368,22 @@ class _StudentDashboardState extends State<StudentDashboard>
                   Center(
                     child: AnimatedBuilder(
                       animation: _titleController,
-                      builder: (context, child) {
-                        return Transform.translate(
-                          offset: Offset(
-                            _horizontalMovement.value,
-                            _verticalMovement.value,
-                          ),
-                          child: const Text(
-                            "WorkStudy",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 26,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
+                      builder:
+                          (context, child) => Transform.translate(
+                            offset: Offset(
+                              _horizontalMovement.value,
+                              _verticalMovement.value,
+                            ),
+                            child: const Text(
+                              "WorkStudy",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 26,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
                             ),
                           ),
-                        );
-                      },
                     ),
                   ),
                   Align(
@@ -301,8 +402,6 @@ class _StudentDashboardState extends State<StudentDashboard>
                 ],
               ),
             ),
-
-            // 🔹 Scrollable Content
             Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
@@ -328,7 +427,6 @@ class _StudentDashboardState extends State<StudentDashboard>
                       style: TextStyle(color: Colors.white70),
                     ),
                     const SizedBox(height: 20),
-
                     Row(
                       children: [
                         Expanded(
@@ -336,7 +434,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                             delay: 200,
                             child: _buildStatCard(
                               "Total Hours",
-                              totalHoursWorked.toString(),
+                              totalHoursWorked.toStringAsFixed(1),
                               Icons.timer,
                             ),
                           ),
@@ -347,7 +445,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                             delay: 300,
                             child: _buildStatCard(
                               "This Week",
-                              thisWeekHours.toString(),
+                              thisWeekHours.toStringAsFixed(1),
                               Icons.trending_up,
                             ),
                           ),
@@ -355,7 +453,6 @@ class _StudentDashboardState extends State<StudentDashboard>
                       ],
                     ),
                     const SizedBox(height: 20),
-
                     _fadeSlideIn(
                       delay: 400,
                       child: _buildClockCard(primaryColor, accentColor),
@@ -391,15 +488,14 @@ class _StudentDashboardState extends State<StudentDashboard>
       tween: Tween<double>(begin: 0, end: 1),
       duration: Duration(milliseconds: 700 + delay),
       curve: Curves.easeOut,
-      builder: (context, value, _) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 30 * (1 - value)),
-            child: child,
+      builder:
+          (context, value, _) => Opacity(
+            opacity: value,
+            child: Transform.translate(
+              offset: Offset(0, 30 * (1 - value)),
+              child: child,
+            ),
           ),
-        );
-      },
     );
   }
 
@@ -491,7 +587,6 @@ class _StudentDashboardState extends State<StudentDashboard>
                 ),
               ),
             const SizedBox(height: 16),
-            // ⭐ CHANGE: Removed minimumSize for smaller horizontal length
             ElevatedButton.icon(
               onPressed: isSessionActive ? handleClockOut : handleClockIn,
               style: ElevatedButton.styleFrom(
@@ -499,7 +594,6 @@ class _StudentDashboardState extends State<StudentDashboard>
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                // Add horizontal padding to control button size
                 padding: const EdgeInsets.symmetric(
                   horizontal: 24,
                   vertical: 17,
@@ -559,7 +653,6 @@ class _StudentDashboardState extends State<StudentDashboard>
               ),
             ),
             const SizedBox(height: 12),
-            // ⭐ CHANGE: Removed minimumSize for smaller horizontal length, wrapped in Center
             Center(
               child: ElevatedButton.icon(
                 onPressed: handleSubmitHours,
@@ -568,7 +661,6 @@ class _StudentDashboardState extends State<StudentDashboard>
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  // Add horizontal padding to control button size
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
                     vertical: 17,
@@ -587,7 +679,6 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
   }
 
-  // ✅ FIXED: Removed StatefulBuilder and directly used setState for the main State class.
   Widget _buildActivityCard(Color primaryColor, Color accentColor) {
     List<Map<String, dynamic>> filteredActivities =
         recentActivities
@@ -602,7 +693,6 @@ class _StudentDashboardState extends State<StudentDashboard>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Header
             Row(
               children: [
                 Icon(Icons.history, color: accentColor),
@@ -614,8 +704,6 @@ class _StudentDashboardState extends State<StudentDashboard>
               ],
             ),
             const SizedBox(height: 12),
-
-            // Tabs (Pending | Approved | Declined)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -640,11 +728,8 @@ class _StudentDashboardState extends State<StudentDashboard>
               ],
             ),
             const SizedBox(height: 12),
-
-            // Scrollable Activities - Wrapped in SizedBox for a fixed height within the card
-            // which prevents layout issues when in a SingleChildScrollView
             SizedBox(
-              height: 200, // Fixed height for the list to function correctly
+              height: 200,
               child:
                   filteredActivities.isEmpty
                       ? const Center(
@@ -745,7 +830,6 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
   }
 
-  // Helper widget for tabs
   Widget _buildTabButton({
     required String label,
     required Color color,

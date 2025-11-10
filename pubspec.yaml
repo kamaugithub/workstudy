@@ -54,3 +54,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+work_logs (collection)
+ ┗━ autoID
+     ┣━ studentEmail: "work@gmail.com"
+     ┣━ studentId: "1213"
+     ┣━ department: "IT"
+     ┣━ startTime: <timestamp>
+     ┣━ endTime: <timestamp>
+     ┣━ hoursWorked: 3.5
+     ┣━ description: "Library cataloging"
+     ┣━ status: "pending"
+     ┣━ supervisorEmail: "super@gmail.com"
+     ┗━ createdAt: <timestamp>
