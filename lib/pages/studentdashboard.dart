@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:workstudy/export_helper/firestore_helper.dart';
+import 'package:workstudy/export_helper/firestore_helper.dart'; // Keep this import
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -34,7 +34,10 @@ class _StudentDashboardState extends State<StudentDashboard>
   double totalHoursWorked = 0.0;
   double thisWeekHours = 0.0;
 
-  List<Map<String, dynamic>> recentActivities = [];
+  // Change to StreamSubscription
+  late StreamSubscription<List<Map<String, dynamic>>> _activitiesSubscription;
+  List<Map<String, dynamic>> studentActivities =
+      []; // Renamed from recentActivities
 
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
@@ -56,50 +59,72 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
 
     _loadStudentData();
-    _loadRecentActivities();
+    // Initialize the real-time listener
+    _subscribeToActivities();
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     if (timer.isActive) timer.cancel();
+    _activitiesSubscription.cancel(); // Cancel the subscription
     super.dispose();
   }
 
-  Future<void> _loadStudentData() async {
+  // New method to subscribe to live data
+  void _subscribeToActivities() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final doc =
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-    if (!doc.exists) return;
+    // Use FirestoreHelper to get a stream of student's activities
+    _activitiesSubscription = FirestoreHelper.getStudentWorkSessionsStream(
+      user.uid,
+    ).listen(
+      (sessions) {
+        // Recalculate totals on every update
+        _calculateHours(sessions);
 
-    final data = doc.data()!;
-    setState(() {
-      studentName = data['name'] ?? "Student";
-    });
+        // Update the main list for the Activity Card
+        setState(() {
+          // Sort sessions by timestamp descending (most recent first)
+          sessions.sort(
+            (a, b) => (b['timestamp'] as Timestamp? ?? Timestamp.now())
+                .compareTo(a['timestamp'] as Timestamp? ?? Timestamp.now()),
+          );
 
-    // Calculate totals from work_sessions collection
-    final sessionsQuery =
-        await FirebaseFirestore.instance
-            .collection('work_sessions')
-            .where('studentId', isEqualTo: user.uid)
-            .get();
+          studentActivities = sessions
+              .map(
+                (doc) => {
+                  "date": doc['date'] ?? '',
+                  "hours": doc['hours'] ?? '',
+                  "status": doc['status'] ?? '',
+                  "description": doc['description'] ?? '',
+                  "timestamp":
+                      doc['timestamp'], // Keep timestamp for sorting/debugging
+                },
+              )
+              .toList();
+        });
+      },
+      onError: (error) {
+        // Handle error
+        print("Error fetching activities stream: $error");
+      },
+    );
+  }
 
+  // Combine hour calculation logic into a single function to be called by both _loadStudentData and _subscribeToActivities
+  void _calculateHours(List<Map<String, dynamic>> sessions) {
     double total = 0.0;
     double weekTotal = 0.0;
     final now = DateTime.now();
 
-    for (var session in sessionsQuery.docs) {
+    for (var session in sessions) {
       final hoursStr = session['hours'] ?? "00:00:00";
       final parts = hoursStr.split(":");
       double hours = 0;
       if (parts.length == 3) {
-        hours =
-            int.parse(parts[0]) +
+        hours = int.parse(parts[0]) +
             int.parse(parts[1]) / 60 +
             int.parse(parts[2]) / 3600;
       }
@@ -117,29 +142,26 @@ class _StudentDashboardState extends State<StudentDashboard>
     });
   }
 
-  Future<void> _loadRecentActivities() async {
+  Future<void> _loadStudentData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final query =
-        await FirebaseFirestore.instance
-            .collection('work_sessions')
-            .where('studentId', isEqualTo: user.uid)
-            .orderBy('timestamp', descending: true)
-            .get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    if (!doc.exists) return;
 
+    final data = doc.data()!;
     setState(() {
-      recentActivities =
-          query.docs.map((doc) {
-            return {
-              "date": doc['date'] ?? '',
-              "hours": doc['hours'] ?? '',
-              "status": doc['status'] ?? '',
-              "description": doc['description'] ?? '',
-            };
-          }).toList();
+      studentName = data['name'] ?? "Student";
     });
+
+    // The calculation of totalHoursWorked and thisWeekHours is now handled by _subscribeToActivities
+    // which calls _calculateHours on every update.
   }
+
+  // Removed _loadRecentActivities as it's replaced by _subscribeToActivities
 
   void handleClockIn() {
     setState(() {
@@ -191,23 +213,31 @@ class _StudentDashboardState extends State<StudentDashboard>
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      if (user == null) return; // Make sure user is signed in
 
-      final studentDoc =
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .get();
+      final studentDocRef =
+          FirebaseFirestore.instance.collection('users').doc(user.uid);
+      final studentDoc = await studentDocRef.get();
+
       if (!studentDoc.exists) return;
-      final department = studentDoc['department'];
 
-      final supervisorQuery =
-          await FirebaseFirestore.instance
-              .collection('users')
-              .where('role', isEqualTo: 'supervisor')
-              .where('department', isEqualTo: department)
-              .limit(1)
-              .get();
+      // Auto-create roleLower if missing
+      if (!studentDoc.data()!.containsKey('roleLower')) {
+        final role = studentDoc['role'] ?? '';
+        await studentDocRef.update({
+          'roleLower': role.toString().toLowerCase(),
+        });
+      }
+
+      final studentDepartment = studentDoc['department'];
+
+      // Case-insensitive supervisor query using roleLower
+      final supervisorQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('roleLower', isEqualTo: 'supervisor')
+          .where('departmentLower', isEqualTo: studentDepartment.toLowerCase())
+          .limit(1)
+          .get();
 
       if (supervisorQuery.docs.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -218,12 +248,13 @@ class _StudentDashboardState extends State<StudentDashboard>
         return;
       }
 
-      final supervisorId = supervisorQuery.docs.first.id;
+      final supervisorUid = supervisorQuery.docs.first.id;
 
-      await FirebaseFirestore.instance.collection('work_sessions').add({
+      // Save work session
+      await FirestoreHelper.addWorkSession({
         'studentId': user.uid,
-        'supervisorId': supervisorId,
-        'department': department,
+        'supervisorId': supervisorUid,
+        'department': studentDepartment,
         'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
         'hours': currentSessionDuration,
         'description': comment.trim(),
@@ -236,9 +267,8 @@ class _StudentDashboardState extends State<StudentDashboard>
         isSessionActive = false;
         currentSessionDuration = "00:00:00";
       });
+
       if (timer.isActive) timer.cancel();
-      _loadRecentActivities();
-      _loadStudentData();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -246,13 +276,20 @@ class _StudentDashboardState extends State<StudentDashboard>
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error submitting hours: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error submitting hours: $e")),
+      );
     }
   }
 
+// Updated to use FirestoreHelper.getAllWorkSessions()
   Future<void> exportExcel() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Fetch live data for export
+    final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
+
     final workbook = excel.Excel.createExcel();
     final sheet = workbook['Report'];
     sheet.appendRow([
@@ -262,12 +299,12 @@ class _StudentDashboardState extends State<StudentDashboard>
       excel.TextCellValue("Description"),
     ]);
 
-    for (var activity in recentActivities) {
+    for (var session in sessions) {
       sheet.appendRow([
-        excel.TextCellValue(activity["date"] ?? ''),
-        excel.TextCellValue(activity["hours"]?.toString() ?? ''),
-        excel.TextCellValue(activity["status"] ?? ''),
-        excel.TextCellValue(activity["description"] ?? ''),
+        excel.TextCellValue(session["date"] ?? ''),
+        excel.TextCellValue(session["hours"]?.toString() ?? ''),
+        excel.TextCellValue(session["status"] ?? ''),
+        excel.TextCellValue(session["description"] ?? ''),
       ]);
     }
 
@@ -290,36 +327,41 @@ class _StudentDashboardState extends State<StudentDashboard>
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // Updated to use FirestoreHelper.getAllWorkSessions()
   Future<void> exportPDF() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Fetch live data for export
+    final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
+
     final pdf = pw.Document();
     pdf.addPage(
       pw.Page(
-        build:
-            (context) => pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  "WorkStudy Report",
-                  style: pw.TextStyle(
-                    fontSize: 22,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 10),
-                pw.Table.fromTextArray(
-                  headers: ["Date", "Hours", "Status", "Description"],
-                  data:
-                      recentActivities.map((e) {
-                        return [
-                          e["date"] ?? '',
-                          e["hours"].toString(),
-                          e["status"] ?? '',
-                          e["description"] ?? '',
-                        ];
-                      }).toList(),
-                ),
-              ],
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              "WorkStudy Report",
+              style: pw.TextStyle(
+                fontSize: 22,
+                fontWeight: pw.FontWeight.bold,
+              ),
             ),
+            pw.SizedBox(height: 10),
+            pw.Table.fromTextArray(
+              headers: ["Date", "Hours", "Status", "Description"],
+              data: sessions.map((e) {
+                return [
+                  e["date"] ?? '',
+                  e["hours"].toString(),
+                  e["status"] ?? '',
+                  e["description"] ?? '',
+                ];
+              }).toList(),
+            ),
+          ],
+        ),
       ),
     );
 
@@ -368,22 +410,21 @@ class _StudentDashboardState extends State<StudentDashboard>
                   Center(
                     child: AnimatedBuilder(
                       animation: _titleController,
-                      builder:
-                          (context, child) => Transform.translate(
-                            offset: Offset(
-                              _horizontalMovement.value,
-                              _verticalMovement.value,
-                            ),
-                            child: const Text(
-                              "WorkStudy",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 26,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
+                      builder: (context, child) => Transform.translate(
+                        offset: Offset(
+                          _horizontalMovement.value,
+                          _verticalMovement.value,
+                        ),
+                        child: const Text(
+                          "WorkStudy",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
                           ),
+                        ),
+                      ),
                     ),
                   ),
                   Align(
@@ -488,14 +529,13 @@ class _StudentDashboardState extends State<StudentDashboard>
       tween: Tween<double>(begin: 0, end: 1),
       duration: Duration(milliseconds: 700 + delay),
       curve: Curves.easeOut,
-      builder:
-          (context, value, _) => Opacity(
-            opacity: value,
-            child: Transform.translate(
-              offset: Offset(0, 30 * (1 - value)),
-              child: child,
-            ),
-          ),
+      builder: (context, value, _) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 30 * (1 - value)),
+          child: child,
+        ),
+      ),
     );
   }
 
@@ -680,10 +720,10 @@ class _StudentDashboardState extends State<StudentDashboard>
   }
 
   Widget _buildActivityCard(Color primaryColor, Color accentColor) {
-    List<Map<String, dynamic>> filteredActivities =
-        recentActivities
-            .where((activity) => activity["status"] == selectedActivityTab)
-            .toList();
+    // Uses the new `studentActivities` list which is updated via the stream
+    List<Map<String, dynamic>> filteredActivities = studentActivities
+        .where((activity) => activity["status"] == selectedActivityTab)
+        .toList();
 
     return Card(
       color: Colors.white.withOpacity(0.85),
@@ -730,99 +770,96 @@ class _StudentDashboardState extends State<StudentDashboard>
             const SizedBox(height: 12),
             SizedBox(
               height: 200,
-              child:
-                  filteredActivities.isEmpty
-                      ? const Center(
-                        child: Text(
-                          "No activities available",
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      )
-                      : ListView.builder(
-                        itemCount: filteredActivities.length,
-                        itemBuilder: (context, index) {
-                          final activity = filteredActivities[index];
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey.shade200),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.calendar_today,
-                                            size: 14,
+              child: filteredActivities.isEmpty
+                  ? Center(
+                      child: Text(
+                        "No $selectedActivityTab activities available",
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: filteredActivities.length,
+                      itemBuilder: (context, index) {
+                        final activity = filteredActivities[index];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade200),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.calendar_today,
+                                          size: 14,
+                                          color: Colors.grey,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          activity["date"],
+                                          style: const TextStyle(
+                                            fontSize: 12,
                                             color: Colors.grey,
                                           ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            activity["date"],
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color:
-                                                  activity["status"] ==
-                                                          "approved"
-                                                      ? Colors.green
-                                                      : activity["status"] ==
-                                                          "declined"
-                                                      ? Colors.red
-                                                      : Colors.orange,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            ),
-                                            child: Text(
-                                              activity["status"],
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        activity["description"],
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w500,
-                                          color: Color(0xFF032540),
                                         ),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color:
+                                                activity["status"] == "approved"
+                                                    ? Colors.green
+                                                    : activity["status"] ==
+                                                            "declined"
+                                                        ? Colors.red
+                                                        : Colors.orange,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            activity["status"],
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      activity["description"],
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                        color: Color(0xFF032540),
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
-                                Text(
-                                  "${activity["hours"]}h",
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF032540),
-                                  ),
+                              ),
+                              Text(
+                                "${activity["hours"]}h",
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF032540),
                                 ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

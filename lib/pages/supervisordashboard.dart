@@ -7,7 +7,7 @@ import 'package:excel/excel.dart' as excel;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
-// Assuming these helper files exist in your project structure for conditional imports
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/export_helper/save_file_web.dart'
     if (dart.library.io) 'package:workstudy/export_helper/save_file_other.dart';
@@ -19,61 +19,19 @@ class SupervisorDashboard extends StatefulWidget {
   @override
   State<SupervisorDashboard> createState() => _SupervisorDashboardState();
 }
-   
+
 class _SupervisorDashboardState extends State<SupervisorDashboard>
     with TickerProviderStateMixin {
   // Theme Colors
   static const primaryColor = Color(0xFF032540);
   static const accentColor = Color(0xFF02AEEE);
 
-  // Supervisor State & Data
+  // Supervisor State
   String selectedActivityTab = 'pending';
   final String supervisorName = "Jane Doe";
-  final int totalStudents = 15;
-  final int pendingApprovals = 3;
 
-  final List<Map<String, dynamic>> allActivities = [
-    {
-      "id": 101,
-      "date": "2024-01-15",
-      "hours": 4.0,
-      "status": "approved",
-      "description": "Library cataloging system updates.",
-      "student": "John Stone",
-    },
-    {
-      "id": 102,
-      "date": "2024-01-14",
-      "hours": 3.5,
-      "status": "pending",
-      "description": "Computer lab hardware maintenance.",
-      "student": "Alice Smith",
-    },
-    {
-      "id": 103,
-      "date": "2024-01-12",
-      "hours": 5.0,
-      "status": "declined",
-      "description": "Student registration assistance during peak.",
-      "student": "Bob Johnson",
-    },
-    {
-      "id": 104,
-      "date": "2024-01-16",
-      "hours": 2.0,
-      "status": "pending",
-      "description": "Data entry for bursary records.",
-      "student": "John Stone",
-    },
-    {
-      "id": 105,
-      "date": "2024-01-17",
-      "hours": 4.5,
-      "status": "approved",
-      "description": "Assisted with inventory check.",
-      "student": "Alice Smith",
-    },
-  ];
+  // Firestore instance
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
@@ -101,28 +59,55 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     super.dispose();
   }
 
-  // --- Supervisor Actions ---
+  // --- Firestore Helpers ---
+  Stream<List<Map<String, dynamic>>> getActivitiesStream() {
+    return _firestore
+        .collection('work_sessions')
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) {
+              final data = doc.data();
+              return {
+                'id': doc.id,
+                'student': data['studentName'] ?? 'Unknown',
+                'hours': data['hours'] ?? 0,
+                'status': data['status'] ?? 'pending',
+                'description': data['description'] ?? '',
+                'timestamp': data['timestamp'] as Timestamp?,
+                'date': (data['timestamp'] as Timestamp?)
+                        ?.toDate()
+                        .toString()
+                        .split(' ')[0] ??
+                    '',
+              };
+            }).toList());
+  }
 
-  void handleApproval(int activityId, String newStatus) {
-    setState(() {
-      final activityIndex = allActivities.indexWhere(
-        (activity) => activity['id'] == activityId,
-      );
-      if (activityIndex != -1) {
-        allActivities[activityIndex]['status'] = newStatus;
+  Future<void> handleApproval(String activityId, String newStatus) async {
+    try {
+      await _firestore
+          .collection('work_sessions')
+          .doc(activityId)
+          .update({'status': newStatus});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Activity $activityId $newStatus.")),
+        );
       }
-    });
-
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text("Activity $activityId $newStatus.")));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to update activity: $e")),
+        );
+      }
+    }
   }
 
   // --- Export Functions ---
-
-  List<List<excel.CellValue>> _getReportData(String reportType) {
-    // Generate data for the report
-    final List<List<excel.CellValue>> data = [
+  List<List<excel.CellValue>> _getReportData(
+      List<Map<String, dynamic>> activities) {
+    final data = [
       [
         excel.TextCellValue("Date"),
         excel.TextCellValue("Student"),
@@ -132,20 +117,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       ],
     ];
 
-    // Filter based on report type (simplified logic)
-    final filteredActivities =
-        allActivities.where((a) {
-          if (reportType == 'Weekly') {
-            // Dummy filter: only show activities from the last 7 days (or simply all in this dummy setup)
-            return true;
-          } else if (reportType == 'Monthly') {
-            // Dummy filter: only show activities from a specific month (or simply all)
-            return true;
-          }
-          return false;
-        }).toList();
-
-    for (var activity in filteredActivities) {
+    for (var activity in activities) {
       data.add([
         excel.TextCellValue(activity["date"] ?? ''),
         excel.TextCellValue(activity["student"] ?? ''),
@@ -157,10 +129,11 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     return data;
   }
 
-  Future<void> _exportExcel(String reportType) async {
+  Future<void> _exportExcel(
+      String reportType, List<Map<String, dynamic>> activities) async {
     final workbook = excel.Excel.createExcel();
     final sheet = workbook['$reportType Report'];
-    final data = _getReportData(reportType);
+    final data = _getReportData(activities);
 
     for (var row in data) {
       sheet.appendRow(row);
@@ -182,37 +155,32 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
-  Future<void> _exportPDF(String reportType) async {
+  Future<void> _exportPDF(
+      String reportType, List<Map<String, dynamic>> activities) async {
     final pdf = pw.Document();
-    final data = _getReportData(reportType)
+    final data = _getReportData(activities)
         .map((row) => row.map((e) => e.toString()).toList())
         .toList();
-
     final headers = data.removeAt(0);
 
     pdf.addPage(
       pw.Page(
-        build:
-            (context) => pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  "WorkStudy $reportType Report",
-                  style: pw.TextStyle(
-                    fontSize: 22,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 10),
-                pw.Table.fromTextArray(headers: headers, data: data),
-              ],
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              "WorkStudy $reportType Report",
+              style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
             ),
+            pw.SizedBox(height: 10),
+            pw.Table.fromTextArray(headers: headers, data: data),
+          ],
+        ),
       ),
     );
 
@@ -230,14 +198,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
   // --- Widget Builders ---
-
   Widget _fadeSlideIn({required int delay, required Widget child}) {
     return TweenAnimationBuilder(
       tween: Tween<double>(begin: 0, end: 1),
@@ -256,11 +222,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
   }
 
   Widget _buildStatCard(
-    String label,
-    String value,
-    IconData icon,
-    Color iconColor,
-  ) {
+      String label, String value, IconData icon, Color iconColor) {
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
@@ -280,10 +242,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                 Text(
                   value,
                   style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: primaryColor,
-                  ),
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: primaryColor),
                 ),
                 Text(label, style: const TextStyle(color: Colors.grey)),
               ],
@@ -294,11 +255,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     );
   }
 
-  Widget _buildApprovalCard() {
-    List<Map<String, dynamic>> filteredActivities =
-        allActivities
-            .where((activity) => activity["status"] == selectedActivityTab)
-            .toList();
+  Widget _buildApprovalCard(List<Map<String, dynamic>> activities) {
+    final filteredActivities =
+        activities.where((a) => a["status"] == selectedActivityTab).toList();
 
     return Card(
       color: Colors.white.withOpacity(0.85),
@@ -313,15 +272,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
               children: [
                 Icon(Icons.rule, color: accentColor),
                 const SizedBox(width: 8),
-                const Text(
-                  "Student Activity Approvals",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
+                const Text("Student Activity Approvals",
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
               ],
             ),
             const Divider(height: 20),
-
-            // Tabs (Pending | Approved | Declined)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -346,129 +302,97 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
               ],
             ),
             const SizedBox(height: 12),
-
-            // Activity List
             SizedBox(
               height: 300,
-              child:
-                  filteredActivities.isEmpty
-                      ? Center(
-                        child: Text(
-                          "No $selectedActivityTab activities found.",
-                          style: const TextStyle(color: Colors.grey),
-                        ),
-                      )
-                      : ListView.builder(
-                        itemCount: filteredActivities.length,
-                        itemBuilder: (context, index) {
-                          final activity = filteredActivities[index];
-                          final statusColor =
-                              activity["status"] == "approved"
-                                  ? Colors.green
-                                  : activity["status"] == "declined"
-                                  ? Colors.red
-                                  : Colors.orange;
+              child: filteredActivities.isEmpty
+                  ? Center(
+                      child: Text("No $selectedActivityTab activities found.",
+                          style: const TextStyle(color: Colors.grey)))
+                  : ListView.builder(
+                      itemCount: filteredActivities.length,
+                      itemBuilder: (context, index) {
+                        final activity = filteredActivities[index];
+                        final statusColor = activity["status"] == "approved"
+                            ? Colors.green
+                            : activity["status"] == "declined"
+                                ? Colors.red
+                                : Colors.orange;
 
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: statusColor.withOpacity(0.3),
-                              ),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            border:
+                                Border.all(color: statusColor.withOpacity(0.3)),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
                                       "${activity['student']} (${activity['hours']}h)",
                                       style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: primaryColor,
-                                      ),
-                                    ),
-                                    Text(
-                                      activity['date'],
+                                          fontWeight: FontWeight.bold,
+                                          color: primaryColor)),
+                                  Text(activity['date'],
                                       style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey,
+                                          fontSize: 12, color: Colors.grey)),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(activity['description'],
+                                  style: const TextStyle(fontSize: 14)),
+                              if (selectedActivityTab == 'pending')
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      SizedBox(
+                                        height: 30,
+                                        child: OutlinedButton(
+                                          onPressed: () => handleApproval(
+                                              activity['id'], 'declined'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.red,
+                                            side: const BorderSide(
+                                                color: Colors.red),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10),
+                                          ),
+                                          child: const Text('Decline',
+                                              style: TextStyle(fontSize: 12)),
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  activity['description'],
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                                if (selectedActivityTab == 'pending')
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 8.0),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        SizedBox(
-                                          height: 30,
-                                          child: OutlinedButton(
-                                            onPressed:
-                                                () => handleApproval(
-                                                  activity['id'],
-                                                  'declined',
-                                                ),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.red,
-                                              side: const BorderSide(
-                                                color: Colors.red,
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                  ),
-                                            ),
-                                            child: const Text(
-                                              'Decline',
-                                              style: TextStyle(fontSize: 12),
-                                            ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        height: 30,
+                                        child: ElevatedButton(
+                                          onPressed: () => handleApproval(
+                                              activity['id'], 'approved'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.green,
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10),
                                           ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        SizedBox(
-                                          height: 30,
-                                          child: ElevatedButton(
-                                            onPressed:
-                                                () => handleApproval(
-                                                  activity['id'],
-                                                  'approved',
-                                                ),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.green,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                  ),
-                                            ),
-                                            child: const Text(
-                                              'Approve',
+                                          child: const Text('Approve',
                                               style: TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
+                                                  fontSize: 12,
+                                                  color: Colors.white)),
                                         ),
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -491,25 +415,17 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
           color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
           border: isSelected ? Border.all(color: color, width: 1.5) : null,
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: isSelected ? color : Colors.grey.shade600,
-          ),
-        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: isSelected ? color : Colors.grey.shade600)),
       ),
     );
   }
 
-  Widget _buildExportCard(
-    String label,
-    IconData icon,
-    Color color,
-    Function(String) onExportExcel,
-    Function(String) onExportPDF,
-  ) {
+  Widget _buildExportCard(String label, IconData icon, Color color,
+      List<Map<String, dynamic>> activities) {
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
@@ -523,13 +439,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
               children: [
                 Icon(icon, color: color),
                 const SizedBox(width: 8),
-                Text(
-                  "$label Report",
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                Text("$label Report",
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
             const SizedBox(height: 12),
@@ -537,23 +449,19 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => onExportExcel(label),
+                    onPressed: () => _exportExcel(label, activities),
                     icon: const Icon(Icons.table_chart, color: Colors.green),
-                    label: const Text(
-                      "Export Excel",
-                      style: TextStyle(color: Colors.green),
-                    ),
+                    label: const Text("Export Excel",
+                        style: TextStyle(color: Colors.green)),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => onExportPDF(label),
+                    onPressed: () => _exportPDF(label, activities),
                     icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
-                    label: const Text(
-                      "Export PDF",
-                      style: TextStyle(color: Colors.red),
-                    ),
+                    label: const Text("Export PDF",
+                        style: TextStyle(color: Colors.red)),
                   ),
                 ),
               ],
@@ -579,10 +487,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                 color: accentColor,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 6,
-                    offset: Offset(0, 2),
-                  ),
+                      color: Colors.black26,
+                      blurRadius: 6,
+                      offset: Offset(0, 2))
                 ],
               ),
               child: Stack(
@@ -590,23 +497,18 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                   Center(
                     child: AnimatedBuilder(
                       animation: _titleController,
-                      builder: (context, child) {
-                        return Transform.translate(
-                          offset: Offset(
-                            _horizontalMovement.value,
-                            _verticalMovement.value,
-                          ),
-                          child: const Text(
-                            "WorkStudy",
-                            style: TextStyle(
+                      builder: (context, child) => Transform.translate(
+                        offset: Offset(
+                            _horizontalMovement.value, _verticalMovement.value),
+                        child: const Text(
+                          "WorkStudy",
+                          style: TextStyle(
                               color: Colors.white,
                               fontSize: 26,
                               fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        );
-                      },
+                              letterSpacing: 0.5),
+                        ),
+                      ),
                     ),
                   ),
                   Align(
@@ -616,9 +518,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                       tooltip: "Logout",
                       onPressed: () {
                         Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(builder: (_) => const LoginPage()),
-                        );
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const LoginPage()));
                       },
                     ),
                   ),
@@ -628,107 +530,96 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
 
             // 🔹 Scrollable Content
             Expanded(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 10),
-                    _fadeSlideIn(
-                      delay: 100,
-                      child: Text(
-                        "Welcome Supervisor $supervisorName!",
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: primaryColor,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      "Manage student work hour approvals and reports.",
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                    const SizedBox(height: 20),
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: getActivitiesStream(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    } else if (snapshot.hasError) {
+                      return Center(child: Text("Error: ${snapshot.error}"));
+                    }
 
-                    // Stats Card Row
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _fadeSlideIn(
-                            delay: 200,
-                            child: _buildStatCard(
-                              "Total Students",
-                              totalStudents.toString(),
-                              Icons.group,
-                              primaryColor,
-                            ),
+                    final activities = snapshot.data ?? [];
+
+                    final totalStudents =
+                        activities.map((a) => a['student']).toSet().length;
+                    final pendingApprovals = activities
+                        .where((a) => a['status'] == 'pending')
+                        .length;
+
+                    return SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 10),
+                          _fadeSlideIn(
+                              delay: 100,
+                              child: Text("Welcome Supervisor $supervisorName!",
+                                  style: const TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      color: primaryColor))),
+                          const SizedBox(height: 4),
+                          const Text(
+                              "Manage student work hour approvals and reports.",
+                              style: TextStyle(color: Colors.white70)),
+                          const SizedBox(height: 20),
+                          Row(
+                            children: [
+                              Expanded(
+                                  child: _fadeSlideIn(
+                                      delay: 200,
+                                      child: _buildStatCard(
+                                          "Total Students",
+                                          totalStudents.toString(),
+                                          Icons.group,
+                                          primaryColor))),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                  child: _fadeSlideIn(
+                                      delay: 300,
+                                      child: _buildStatCard(
+                                          "Pending Approvals",
+                                          pendingApprovals.toString(),
+                                          Icons.pending_actions,
+                                          Colors.orange))),
+                            ],
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _fadeSlideIn(
-                            delay: 300,
-                            child: _buildStatCard(
-                              "Pending Approvals",
-                              pendingApprovals.toString(),
-                              Icons.pending_actions,
-                              Colors.orange,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Approval Card
-                    _fadeSlideIn(delay: 400, child: _buildApprovalCard()),
-                    const SizedBox(height: 20),
-
-                    // Export Options Header
-                    _fadeSlideIn(
-                      delay: 500,
-                      child: const Text(
-                        "Export Options",
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: primaryColor,
-                        ),
+                          const SizedBox(height: 20),
+                          _fadeSlideIn(
+                              delay: 400,
+                              child: _buildApprovalCard(activities)),
+                          const SizedBox(height: 20),
+                          _fadeSlideIn(
+                              delay: 500,
+                              child: const Text("Export Options",
+                                  style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: primaryColor))),
+                          const SizedBox(height: 12),
+                          _fadeSlideIn(
+                              delay: 600,
+                              child: _buildExportCard(
+                                  "Weekly",
+                                  Icons.calendar_view_week,
+                                  accentColor,
+                                  activities)),
+                          const SizedBox(height: 12),
+                          _fadeSlideIn(
+                              delay: 700,
+                              child: _buildExportCard(
+                                  "Monthly",
+                                  Icons.calendar_month,
+                                  primaryColor,
+                                  activities)),
+                          const SizedBox(height: 40),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Weekly Report Export Card
-                    _fadeSlideIn(
-                      delay: 600,
-                      child: _buildExportCard(
-                        "Weekly",
-                        Icons.calendar_view_week,
-                        accentColor,
-                        _exportExcel,
-                        _exportPDF,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Monthly Report Export Card
-                    _fadeSlideIn(
-                      delay: 700,
-                      child: _buildExportCard(
-                        "Monthly",
-                        Icons.calendar_month,
-                        primaryColor,
-                        _exportExcel,
-                        _exportPDF,
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-                  ],
-                ),
-              ),
+                    );
+                  }),
             ),
           ],
         ),

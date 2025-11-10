@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart'; // ✅ This file will be generated after running `flutterfire configure`
+import 'firebase_options.dart';
 import 'package:workstudy/pages/login.dart';
 
+//import 'package:workstudy/update_users.dart';
+//import 'package:workstudy/auto_create_supervisors.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(const WorkStudyApp());
 }
 
@@ -15,19 +20,31 @@ class WorkStudyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'WorkStudy',
       debugShowCheckedModeBanner: false,
+      title: 'Work Study',
       theme: ThemeData(
-        fontFamily: 'Segoe UI',
-        primaryColor: const Color(0xFF3b82f6),
-        colorScheme: ColorScheme.fromSwatch().copyWith(
-          primary: const Color(0xFF3b82f6),
-          secondary: const Color(0xFFfacc15),
-        ),
+        primarySwatch: Colors.blue,
       ),
-      home: const LandingPage(),
+      home: const LoginPage(),
     );
   }
+}
+
+@override
+Widget build(BuildContext context) {
+  return MaterialApp(
+    title: 'WorkStudy',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      fontFamily: 'Segoe UI',
+      primaryColor: const Color(0xFF3b82f6),
+      colorScheme: ColorScheme.fromSwatch().copyWith(
+        primary: const Color(0xFF3b82f6),
+        secondary: const Color(0xFFfacc15),
+      ),
+    ),
+    home: const LandingPage(),
+  );
 }
 
 class LandingPage extends StatelessWidget {

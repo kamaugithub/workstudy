@@ -5,7 +5,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.7.0
+  sdk: '>=3.0.0 <4.0.0' # Corrected to standard Dart SDK range
 
 dependencies:
   flutter:
@@ -38,7 +38,8 @@ dependencies:
 
   # ✅ File picker for selecting export locations
   file_picker: ^8.0.0
-    # Firebase core (must be first)
+
+  # Firebase core (must be first)
   firebase_core: ^3.15.2
 
   # Firebase authentication (for login/signup)
@@ -49,20 +50,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  
   flutter_lints: ^5.0.0
 
 flutter:
   uses-material-design: true
-work_logs (collection)
- ┗━ autoID
-     ┣━ studentEmail: "work@gmail.com"
-     ┣━ studentId: "1213"
-     ┣━ department: "IT"
-     ┣━ startTime: <timestamp>
-     ┣━ endTime: <timestamp>
-     ┣━ hoursWorked: 3.5
-     ┣━ description: "Library cataloging"
-     ┣━ status: "pending"
-     ┣━ supervisorEmail: "super@gmail.com"
-     ┗━ createdAt: <timestamp>
+
