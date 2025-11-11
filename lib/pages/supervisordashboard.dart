@@ -28,7 +28,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
 
   // Supervisor State
   String selectedActivityTab = 'pending';
-  final String supervisorName = "Jane Doe";
+  final String supervisorName = "";
 
   // Firestore instance
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -69,7 +69,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
               final data = doc.data();
               return {
                 'id': doc.id,
-                'student': data['studentName'] ?? 'Unknown',
+                'student': data['studentName'] ?? '',
                 'hours': data['hours'] ?? 0,
                 'status': data['status'] ?? 'pending',
                 'description': data['description'] ?? '',

@@ -1,6 +1,9 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:workstudy/pages/login.dart';
 import 'dart:async';
+
+import 'package:workstudy/service/firebase_service.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -15,18 +18,14 @@ class _AdminDashboardState extends State<AdminDashboard>
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
 
-  final stats = {
-    "totalStudents": 45,
-    "totalSupervisors": 8,
-    "pendingApprovals": 12,
-    "totalHoursApproved": 1247,
-  };
+  final FirebaseService _firebaseService = FirebaseService();
 
-  final List<Map<String, String>> users = [
-    {"role": "Supervisor", "email": "janesmith200308@daystar.ac.ke"},
-    {"role": "Student", "email": "kelvinjohnson210308@daystar.ac.ke"},
-    {"role": "Student", "email": "alicestones3245@daystar.ac.ke"},
-  ];
+  Map<String, dynamic> stats = {
+    "totalStudents": 0,
+    "totalSupervisors": 0,
+    "pendingApprovals": 0,
+    "totalHoursApproved": 0,
+  };
 
   String searchQuery = "";
   bool isLoading = false;
@@ -43,6 +42,9 @@ class _AdminDashboardState extends State<AdminDashboard>
       begin: 0.5,
       end: 1.0,
     ).animate(_animationController);
+
+    // Load initial data
+    _loadDashboardStats();
   }
 
   @override
@@ -52,11 +54,27 @@ class _AdminDashboardState extends State<AdminDashboard>
     super.dispose();
   }
 
-  Future<void> _showLoadingEffect(VoidCallback action) async {
+  // Load dashboard statistics
+  Future<void> _loadDashboardStats() async {
+    try {
+      final dashboardStats = await _firebaseService.getDashboardStats();
+      setState(() {
+        stats = dashboardStats;
+      });
+    } catch (e) {
+      _showSnack("Error loading dashboard stats: $e");
+    }
+  }
+
+  Future<void> _showLoadingEffect(Future<void> Function() action) async {
     setState(() => isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
-    setState(() => isLoading = false);
-    action();
+    try {
+      await action();
+    } catch (e) {
+      _showSnack("Error: $e");
+    } finally {
+      setState(() => isLoading = false);
+    }
   }
 
   bool _isValidEmail(String email) {
@@ -79,165 +97,192 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _handleExport(String format) async {
-    _showLoadingEffect(() {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "✅ ${format.toUpperCase()} report generated successfully!",
-          ),
-          duration: const Duration(seconds: 2),
-        ),
+    _showLoadingEffect(() async {
+      // Simulate export process
+      await Future.delayed(const Duration(seconds: 2));
+      _showSnack(
+        "✅ ${format.toUpperCase()} report generated successfully!",
+        color: Colors.green,
       );
     });
   }
 
-  void _confirmDelete(String email) {
+  void _confirmDelete(String userId, String email) {
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text("Delete User"),
-            content: Text("Are you sure you want to remove $email?"),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () async {
-                  Navigator.pop(context); // close dialog first
-                  await _showLoadingEffect(() {
-                    setState(() {
-                      users.removeWhere((u) => u["email"] == email);
-                    });
-                    _showSnack(
-                      "$email removed successfully.",
-                      color: Colors.green,
-                    );
-                  });
-                },
-                child: const Text("Delete"),
-              ),
-            ],
+      builder: (context) => AlertDialog(
+        title: const Text("Delete User"),
+        content: Text("Are you sure you want to remove $email?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
           ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(context);
+              await _showLoadingEffect(() async {
+                try {
+                  await _firebaseService.deleteUser(userId);
+                  _showSnack(
+                    "$email removed successfully.",
+                    color: Colors.green,
+                  );
+                  _loadDashboardStats();
+                } catch (e) {
+                  _showSnack("Error deleting user: $e");
+                }
+              });
+            },
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
     );
   }
 
   void _addUserDialog(String role) {
-    final controller = TextEditingController();
+    final emailController = TextEditingController();
+    final nameController = TextEditingController();
+
     showDialog(
       context: context,
-      builder:
-          (_) => AlertDialog(
-            title: Text("Add $role"),
-            content: TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                hintText: "Enter $role email",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+      builder: (_) => AlertDialog(
+        title: Text("Add $role"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: "Full Name",
+                border: OutlineInputBorder(),
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
+            const SizedBox(height: 12),
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(
+                labelText: "Email",
+                border: OutlineInputBorder(),
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  final email = controller.text.trim();
-                  if (!_isValidEmail(email)) {
-                    Navigator.pop(context);
-                    _showSnack("⚠️ Please use a correct/good email format.");
-                    return;
-                  }
-
-                  Navigator.pop(context); // close dialog first
-                  await _showLoadingEffect(() {
-                    setState(() {
-                      users.add({"email": email, "role": "$role • New"});
-                    });
-                    _showSnack(
-                      "$role added successfully.",
-                      color: Colors.greenAccent,
-                    );
-                  });
-                },
-                child: const Text("Add"),
-              ),
-            ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
           ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = emailController.text.trim();
+              final name = nameController.text.trim();
+
+              if (!_isValidEmail(email) || name.isEmpty) {
+                Navigator.pop(context);
+                _showSnack("⚠️ Please fill all fields correctly.");
+                return;
+              }
+
+              Navigator.pop(context);
+              await _showLoadingEffect(() async {
+                try {
+                  await _firebaseService.addUser(email, role, name);
+                  _showSnack(
+                    "$role added successfully.",
+                    color: Colors.greenAccent,
+                  );
+                  _loadDashboardStats();
+                } catch (e) {
+                  _showSnack("Error adding user: $e");
+                }
+              });
+            },
+            child: const Text("Add"),
+          ),
+        ],
+      ),
     );
   }
 
-  void _editUserDialog(Map<String, String> user) {
-    final emailController = TextEditingController(text: user["email"]);
-    String role = user["role"]!.split("•")[0].trim();
+  void _editUserDialog(Map<String, dynamic> user, String userId) {
+    final emailController = TextEditingController(text: user["email"] ?? '');
+    final nameController = TextEditingController(text: user["name"] ?? '');
+    String role = user["role"] ?? 'Student';
 
     showDialog(
       context: context,
-      builder:
-          (_) => AlertDialog(
-            title: const Text("Edit User"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: emailController,
-                  decoration: const InputDecoration(
-                    labelText: "Email",
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: role,
-                  items:
-                      ["Student", "Supervisor"]
-                          .map(
-                            (r) => DropdownMenuItem(value: r, child: Text(r)),
-                          )
-                          .toList(),
-                  onChanged: (val) => role = val!,
-                  decoration: const InputDecoration(
-                    labelText: "Role",
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
+      builder: (_) => AlertDialog(
+        title: const Text("Edit User"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: "Full Name",
+                border: OutlineInputBorder(),
+              ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
+            const SizedBox(height: 12),
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(
+                labelText: "Email",
+                border: OutlineInputBorder(),
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  final email = emailController.text.trim();
-                  if (!_isValidEmail(email)) {
-                    Navigator.pop(context);
-                    _showSnack("⚠️ Please use a correct/good email format.");
-                    return;
-                  }
-
-                  Navigator.pop(context); // close dialog
-                  await _showLoadingEffect(() {
-                    setState(() {
-                      user["email"] = email;
-                      user["role"] = role;
-                    });
-                    _showSnack(
-                      "✅ User updated successfully.",
-                      color: Colors.greenAccent,
-                    );
-                  });
-                },
-                child: const Text("Save"),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: role,
+              items: ["Student", "Supervisor"]
+                  .map(
+                    (r) => DropdownMenuItem(value: r, child: Text(r)),
+                  )
+                  .toList(),
+              onChanged: (val) => role = val!,
+              decoration: const InputDecoration(
+                labelText: "Role",
+                border: OutlineInputBorder(),
               ),
-            ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
           ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = emailController.text.trim();
+              final name = nameController.text.trim();
+
+              if (!_isValidEmail(email) || name.isEmpty) {
+                Navigator.pop(context);
+                _showSnack("⚠️ Please fill all fields correctly.");
+                return;
+              }
+
+              Navigator.pop(context);
+              await _showLoadingEffect(() async {
+                try {
+                  await _firebaseService.updateUser(userId, email, role, name);
+                  _showSnack(
+                    "✅ User updated successfully.",
+                    color: Colors.greenAccent,
+                  );
+                } catch (e) {
+                  _showSnack("Error updating user: $e");
+                }
+              });
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
     );
   }
 
@@ -245,31 +290,56 @@ class _AdminDashboardState extends State<AdminDashboard>
     final controller = TextEditingController();
     showDialog(
       context: context,
-      builder:
-          (_) => AlertDialog(
-            title: const Text("Search Users"),
-            content: TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                hintText: "Enter email or role",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onChanged:
-                  (val) => setState(() => searchQuery = val.toLowerCase()),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  setState(() => searchQuery = controller.text.toLowerCase());
-                },
-                child: const Text("Search"),
-              ),
-            ],
+      builder: (_) => AlertDialog(
+        title: const Text("Search Users"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: "Enter email, name or role",
+            border: OutlineInputBorder(),
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() => searchQuery = controller.text.toLowerCase());
+            },
+            child: const Text("Search"),
+          ),
+        ],
+      ),
     );
+  }
+
+  void _approveUser(String userId, String email) async {
+    await _showLoadingEffect(() async {
+      try {
+        await _firebaseService.updateUserStatus(userId, 'approved');
+        _showSnack(
+          "$email approved successfully.",
+          color: Colors.green,
+        );
+        _loadDashboardStats();
+      } catch (e) {
+        _showSnack("Error approving user: $e");
+      }
+    });
+  }
+
+  void _declineUser(String userId, String email) async {
+    await _showLoadingEffect(() async {
+      try {
+        await _firebaseService.updateUserStatus(userId, 'declined');
+        _showSnack(
+          "$email declined.",
+          color: Colors.red,
+        );
+        _loadDashboardStats();
+      } catch (e) {
+        _showSnack("Error declining user: $e");
+      }
+    });
   }
 
   // --- UI ---
@@ -314,6 +384,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                           child: IconButton(
                             icon: const Icon(Icons.logout, color: Colors.white),
                             onPressed: () {
+                              _firebaseService.signOut();
                               Navigator.pushReplacement(
                                 context,
                                 MaterialPageRoute(
@@ -449,15 +520,6 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   // --- Users Tab ---
   Widget _buildUsersTab() {
-    final filteredUsers =
-        users
-            .where(
-              (u) =>
-                  u["email"]!.toLowerCase().contains(searchQuery) ||
-                  u["role"]!.toLowerCase().contains(searchQuery),
-            )
-            .toList();
-
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -500,39 +562,128 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
           const SizedBox(height: 20),
           Expanded(
-            child: ListView.builder(
-              itemCount: filteredUsers.length,
-              itemBuilder: (_, i) {
-                final u = filteredUsers[i];
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  elevation: 2,
-                  child: ListTile(
-                    title: Text(
-                      u["email"]!,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firebaseService.getUsersStream(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                }
+
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final users = snapshot.data!.docs;
+                final filteredUsers = users.where((user) {
+                  final userData = user.data() as Map<String, dynamic>;
+                  final email =
+                      userData['email']?.toString().toLowerCase() ?? '';
+                  final role = userData['role']?.toString().toLowerCase() ?? '';
+                  final name = userData['name']?.toString().toLowerCase() ?? '';
+
+                  return email.contains(searchQuery) ||
+                      role.contains(searchQuery) ||
+                      name.contains(searchQuery);
+                }).toList();
+
+                if (filteredUsers.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'No users found',
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
                     ),
-                    subtitle: Text(u["role"]!),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.edit,
-                            color: Colors.greenAccent,
-                          ),
-                          onPressed: () => _editUserDialog(u),
+                  );
+                }
+
+                return ListView.builder(
+                  itemCount: filteredUsers.length,
+                  itemBuilder: (_, i) {
+                    final user = filteredUsers[i];
+                    final userData = user.data() as Map<String, dynamic>;
+                    final userId = user.id;
+                    final email = userData['email'] ?? 'No email';
+                    final role = userData['role'] ?? 'No role';
+                    final status = userData['status'] ?? 'pending';
+                    final name = userData['name'] ?? 'No name';
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      elevation: 2,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            Text(email),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text('$role • '),
+                                Text(
+                                  status.toUpperCase(),
+                                  style: TextStyle(
+                                    color: status == 'approved'
+                                        ? Colors.green
+                                        : status == 'pending'
+                                            ? Colors.orange
+                                            : Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                _actionIcon(
+                                  icon: Icons.check_circle,
+                                  label: "Approve",
+                                  color: status == 'approved'
+                                      ? Colors.grey
+                                      : Colors.green,
+                                  onPressed: status == 'approved'
+                                      ? null
+                                      : () => _approveUser(userId, email),
+                                ),
+                                _actionIcon(
+                                  icon: Icons.cancel,
+                                  label: "Decline",
+                                  color: status == 'declined'
+                                      ? Colors.grey
+                                      : Colors.red,
+                                  onPressed: status == 'declined'
+                                      ? null
+                                      : () => _declineUser(userId, email),
+                                ),
+                                _actionIcon(
+                                  icon: Icons.edit,
+                                  label: "Edit",
+                                  color: Colors.blue,
+                                  onPressed: () =>
+                                      _editUserDialog(userData, userId),
+                                ),
+                                _actionIcon(
+                                  icon: Icons.delete,
+                                  label: "Delete",
+                                  color: Colors.orange,
+                                  onPressed: () =>
+                                      _confirmDelete(userId, email),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete,
-                            color: Colors.redAccent,
-                          ),
-                          onPressed: () => _confirmDelete(u["email"]!),
-                        ),
-                      ],
-                    ),
-                  ),
+                      ),
+                    );
+                  },
                 );
               },
             ),
@@ -605,6 +756,30 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
         ),
       ),
+    );
+  }
+
+  Widget _actionIcon({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onPressed,
+  }) {
+    return Column(
+      children: [
+        IconButton(
+          icon: Icon(icon, color: color),
+          onPressed: onPressed,
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: color,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 

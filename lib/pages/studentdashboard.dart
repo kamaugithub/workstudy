@@ -30,14 +30,14 @@ class _StudentDashboardState extends State<StudentDashboard>
   DateTime startTime = DateTime.now();
   String selectedActivityTab = 'pending';
 
-  String studentName = "";
+  String ID = "";
   double totalHoursWorked = 0.0;
   double thisWeekHours = 0.0;
 
   // Change to StreamSubscription
   late StreamSubscription<List<Map<String, dynamic>>> _activitiesSubscription;
   List<Map<String, dynamic>> studentActivities =
-      []; // Renamed from recentActivities
+      []; 
 
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
@@ -73,6 +73,8 @@ class _StudentDashboardState extends State<StudentDashboard>
 
   // New method to subscribe to live data
   void _subscribeToActivities() {
+
+    
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -154,7 +156,7 @@ class _StudentDashboardState extends State<StudentDashboard>
 
     final data = doc.data()!;
     setState(() {
-      studentName = data['name'] ?? "Student";
+      ID = data['ID'] ?? "";
     });
 
     // The calculation of totalHoursWorked and thisWeekHours is now handled by _subscribeToActivities
@@ -454,7 +456,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     _fadeSlideIn(
                       delay: 100,
                       child: Text(
-                        "Hello $studentName 👋",
+                        "Hello $ID 👋",
                         style: const TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
