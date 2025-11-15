@@ -8,10 +8,12 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/export_helper/save_file_web.dart'
     if (dart.library.io) 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/pages/login.dart';
+import 'package:workstudy/export_helper/firestore_helper.dart';
 
 class SupervisorDashboard extends StatefulWidget {
   const SupervisorDashboard({super.key});
@@ -28,11 +30,13 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
 
   // Supervisor State
   String selectedActivityTab = 'pending';
-  final String supervisorName = "";
+  String supervisorName = "";
+  String supervisorDepartment = "";
 
   // Firestore instance
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  // Animation controllers for the header title (KEPT as requested)
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
   late Animation<double> _verticalMovement;
@@ -51,6 +55,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     _verticalMovement = Tween<double>(begin: -2, end: 2).animate(
       CurvedAnimation(parent: _titleController, curve: Curves.easeInOut),
     );
+
+    _loadSupervisorData();
   }
 
   @override
@@ -59,40 +65,63 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     super.dispose();
   }
 
+  Future<void> _loadSupervisorData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final userData = await FirestoreHelper.getUserProfile(user.uid);
+    if (userData == null) return;
+
+    setState(() {
+      supervisorName = userData['name'] ?? "";
+      supervisorDepartment = userData['department'] ?? "";
+    });
+  }
+
   // --- Firestore Helpers ---
   Stream<List<Map<String, dynamic>>> getActivitiesStream() {
+    if (supervisorDepartment.isEmpty) {
+      return Stream.value([]);
+    }
+
+    // Updated to match your Firestore structure and security rules
     return _firestore
-        .collection('work_sessions')
-        .orderBy('timestamp', descending: true)
+        .collection('artifacts')
+        .doc('workstudy-bcda5')
+        .collection('public/data/work_sessions')
+        .where('department',
+            isEqualTo:
+                supervisorDepartment) // Filter by supervisor's department
+        .orderBy('submittedAt', descending: true) // Updated field name
         .snapshots()
         .map((snapshot) => snapshot.docs.map((doc) {
               final data = doc.data();
               return {
                 'id': doc.id,
-                'student': data['studentName'] ?? '',
-                'hours': data['hours'] ?? 0,
-                'status': data['status'] ?? 'pending',
-                'description': data['description'] ?? '',
-                'timestamp': data['timestamp'] as Timestamp?,
-                'date': (data['timestamp'] as Timestamp?)
-                        ?.toDate()
-                        .toString()
-                        .split(' ')[0] ??
-                    '',
+                'studentId': data['studentId'] ?? '',
+                'student': data['studentName'] ??
+                    'Unknown Student', // You might want to fetch student name separately
+                'hours': data['hours'] ?? 0.0, // Now a number
+                'status': data['status']?.toLowerCase() ??
+                    'pending', // Ensure lowercase for filtering
+                'description':
+                    data['reportDetails'] ?? '', // Updated field name
+                'timestamp':
+                    data['submittedAt'] as Timestamp?, // Updated field name
+                'date': data['date'] ?? '', // Use the stored date field
+                'department': data['department'] ?? '',
               };
             }).toList());
   }
 
   Future<void> handleApproval(String activityId, String newStatus) async {
     try {
-      await _firestore
-          .collection('work_sessions')
-          .doc(activityId)
-          .update({'status': newStatus});
+      // Use FirestoreHelper for consistency
+      await FirestoreHelper.updateWorkSessionStatus(activityId, newStatus);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Activity $activityId $newStatus.")),
+          SnackBar(content: Text("Activity $newStatus.")),
         );
       }
     } catch (e) {
@@ -121,7 +150,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       data.add([
         excel.TextCellValue(activity["date"] ?? ''),
         excel.TextCellValue(activity["student"] ?? ''),
-        excel.TextCellValue(activity["hours"]?.toString() ?? ''),
+        excel.TextCellValue(activity["hours"]?.toStringAsFixed(2) ?? '0.00'),
         excel.TextCellValue(activity["status"] ?? ''),
         excel.TextCellValue(activity["description"] ?? ''),
       ]);
@@ -203,23 +232,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     }
   }
 
-  // --- Widget Builders ---
-  Widget _fadeSlideIn({required int delay, required Widget child}) {
-    return TweenAnimationBuilder(
-      tween: Tween<double>(begin: 0, end: 1),
-      duration: Duration(milliseconds: 700 + delay),
-      curve: Curves.easeOut,
-      builder: (context, value, _) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 30 * (1 - value)),
-            child: child,
-          ),
-        );
-      },
-    );
-  }
+  // --- Widget Builders (No animations in the main content) ---
 
   Widget _buildStatCard(
       String label, String value, IconData icon, Color iconColor) {
@@ -294,10 +307,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                   onTap: () => setState(() => selectedActivityTab = 'approved'),
                 ),
                 _buildTabButton(
-                  label: 'Declined',
+                  label: 'Rejected',
                   color: Colors.red,
-                  isSelected: selectedActivityTab == 'declined',
-                  onTap: () => setState(() => selectedActivityTab = 'declined'),
+                  isSelected: selectedActivityTab == 'rejected',
+                  onTap: () => setState(() => selectedActivityTab = 'rejected'),
                 ),
               ],
             ),
@@ -314,7 +327,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                         final activity = filteredActivities[index];
                         final statusColor = activity["status"] == "approved"
                             ? Colors.green
-                            : activity["status"] == "declined"
+                            : activity["status"] == "rejected"
                                 ? Colors.red
                                 : Colors.orange;
 
@@ -334,7 +347,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                     MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                      "${activity['student']} (${activity['hours']}h)",
+                                      "${activity['student']} (${activity['hours']?.toStringAsFixed(1)}h)",
                                       style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                           color: primaryColor)),
@@ -356,7 +369,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                         height: 30,
                                         child: OutlinedButton(
                                           onPressed: () => handleApproval(
-                                              activity['id'], 'declined'),
+                                              activity['id'],
+                                              'Rejected'), // Capitalized to match security rules
                                           style: OutlinedButton.styleFrom(
                                             foregroundColor: Colors.red,
                                             side: const BorderSide(
@@ -364,7 +378,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                             padding: const EdgeInsets.symmetric(
                                                 horizontal: 10),
                                           ),
-                                          child: const Text('Decline',
+                                          child: const Text('Reject',
                                               style: TextStyle(fontSize: 12)),
                                         ),
                                       ),
@@ -373,7 +387,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                         height: 30,
                                         child: ElevatedButton(
                                           onPressed: () => handleApproval(
-                                              activity['id'], 'approved'),
+                                              activity['id'],
+                                              'Approved'), // Capitalized to match security rules
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.green,
                                             padding: const EdgeInsets.symmetric(
@@ -406,22 +421,30 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
-          border: isSelected ? Border.all(color: color, width: 1.5) : null,
+    // --- MODIFICATION: Removed GestureDetector, using ClipRRect + InkWell for static interaction ---
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        splashColor: color.withOpacity(0.2), // Subtle splash without animation
+        highlightColor:
+            color.withOpacity(0.1), // Subtle highlight without animation
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
+            border: isSelected ? Border.all(color: color, width: 1.5) : null,
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? color : Colors.grey.shade600)),
         ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? color : Colors.grey.shade600)),
       ),
     );
+    // --- END MODIFICATION ---
   }
 
   Widget _buildExportCard(String label, IconData icon, Color color,
@@ -479,7 +502,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       body: SafeArea(
         child: Column(
           children: [
-            // 🔹 Fixed Animated Header
+            // 🔹 Fixed Animated Header (Animation is KEPT here)
             Container(
               height: 70,
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -517,6 +540,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                       icon: const Icon(Icons.logout, color: Colors.white),
                       tooltip: "Logout",
                       onPressed: () {
+                        // NOTE: In a real app, this should involve Firebase sign-out
                         Navigator.pushReplacement(
                             context,
                             MaterialPageRoute(
@@ -528,7 +552,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
               ),
             ),
 
-            // 🔹 Scrollable Content
+            // 🔹 Scrollable Content (Animations REMOVED)
             Expanded(
               child: StreamBuilder<List<Map<String, dynamic>>>(
                   stream: getActivitiesStream(),
@@ -544,7 +568,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                     final totalStudents =
                         activities.map((a) => a['student']).toSet().length;
                     final pendingApprovals = activities
-                        .where((a) => a['status'] == 'pending')
+                        .where((a) => a["status"] == 'pending')
                         .length;
 
                     return SingleChildScrollView(
@@ -554,13 +578,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const SizedBox(height: 10),
-                          _fadeSlideIn(
-                              delay: 100,
-                              child: Text("Welcome Supervisor $supervisorName!",
-                                  style: const TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold,
-                                      color: primaryColor))),
+                          // Static content starts here (no animation wrapper)
+                          Text("Welcome Supervisor $supervisorName!",
+                              style: const TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: primaryColor)),
                           const SizedBox(height: 4),
                           const Text(
                               "Manage student work hour approvals and reports.",
@@ -569,52 +592,34 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                           Row(
                             children: [
                               Expanded(
-                                  child: _fadeSlideIn(
-                                      delay: 200,
-                                      child: _buildStatCard(
-                                          "Total Students",
-                                          totalStudents.toString(),
-                                          Icons.group,
-                                          primaryColor))),
+                                  child: _buildStatCard(
+                                      "Total Students",
+                                      totalStudents.toString(),
+                                      Icons.group,
+                                      primaryColor)),
                               const SizedBox(width: 12),
                               Expanded(
-                                  child: _fadeSlideIn(
-                                      delay: 300,
-                                      child: _buildStatCard(
-                                          "Pending Approvals",
-                                          pendingApprovals.toString(),
-                                          Icons.pending_actions,
-                                          Colors.orange))),
+                                  child: _buildStatCard(
+                                      "Pending Approvals",
+                                      pendingApprovals.toString(),
+                                      Icons.pending_actions,
+                                      Colors.orange)),
                             ],
                           ),
                           const SizedBox(height: 20),
-                          _fadeSlideIn(
-                              delay: 400,
-                              child: _buildApprovalCard(activities)),
+                          _buildApprovalCard(activities),
                           const SizedBox(height: 20),
-                          _fadeSlideIn(
-                              delay: 500,
-                              child: const Text("Export Options",
-                                  style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                      color: primaryColor))),
+                          const Text("Export Options",
+                              style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: primaryColor)),
                           const SizedBox(height: 12),
-                          _fadeSlideIn(
-                              delay: 600,
-                              child: _buildExportCard(
-                                  "Weekly",
-                                  Icons.calendar_view_week,
-                                  accentColor,
-                                  activities)),
+                          _buildExportCard("Weekly", Icons.calendar_view_week,
+                              accentColor, activities),
                           const SizedBox(height: 12),
-                          _fadeSlideIn(
-                              delay: 700,
-                              child: _buildExportCard(
-                                  "Monthly",
-                                  Icons.calendar_month,
-                                  primaryColor,
-                                  activities)),
+                          _buildExportCard("Monthly", Icons.calendar_month,
+                              primaryColor, activities),
                           const SizedBox(height: 40),
                         ],
                       ),

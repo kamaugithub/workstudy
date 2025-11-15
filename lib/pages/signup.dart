@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import 'package:workstudy/pages/login.dart';
 import 'package:workstudy/pages/forgot_password.dart';
+import '../service/auth_service.dart';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -60,11 +62,10 @@ class _SignUpPageState extends State<SignUpPage> {
       final role = selectedRole ?? 'Unknown';
 
       // Check if ID already exists
-      final existing =
-          await _firestore
-              .collection('users')
-              .where('idNumber', isEqualTo: idNumber)
-              .get();
+      final existing = await _firestore
+          .collection('users')
+          .where('idNumber', isEqualTo: idNumber)
+          .get();
 
       if (existing.docs.isNotEmpty) {
         setState(() => isLoading = false);
@@ -77,55 +78,57 @@ class _SignUpPageState extends State<SignUpPage> {
         return;
       }
 
-      // Create Firebase user
-      final userCred = await _auth.createUserWithEmailAndPassword(
+      // NEW: Check if email exists using AuthService
+      final authService = Provider.of<AuthService>(context, listen: false);
+      
+      // Create Firebase user using AuthService
+      final user = await authService.signUp(
         email: email,
         password: password,
+        role: role,
+        department: department,
+        idNumber: idNumber,
       );
 
-      // Prepare user data
-      final userData = {
-        'email': email,
-        'idNumber': idNumber,
-        'role': role,
-        'department': department,
-        'createdAt': FieldValue.serverTimestamp(),
-        'weeklyHours': 0,
-        'totalHours': 0,
-        'status': 'active',
-      };
-
-      // Save to Firestore
-      await _firestore
-          .collection('users')
-          .doc(userCred.user!.uid)
-          .set(userData);
-
-      // Success message + redirect
+      // Success message with approval notice
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text("Account Created Successfully"),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.symmetric(horizontal: 55, vertical: 20),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('Registration Successful'),
+            content: const Text(
+              'Your account has been created and is pending admin approval. '
+              'You will be able to login once approved. '
+              'Thank you.'
             ),
-            duration: const Duration(seconds: 2),
-            backgroundColor: const Color(0xFF032540),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context); // Close dialog
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (context) => const LoginPage()),
+                  );
+                },
+                child: const Text('OK'),
+              ),
+            ],
           ),
-        );
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginPage()),
         );
       }
     } on FirebaseAuthException catch (e) {
+      setState(() => isLoading = false);
       String message;
       switch (e.code) {
         case 'email-already-in-use':
           message = "This email is already registered.";
+          break;
+        case 'email-already-exists':
+          message = "This email is already registered.";
+          break;
+        case 'id-already-exists':
+          message = "This ID number is already registered.";
           break;
         case 'weak-password':
           message = "Your password is too weak.";
@@ -140,14 +143,13 @@ class _SignUpPageState extends State<SignUpPage> {
         SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
     } catch (e) {
+      setState(() => isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text("Unexpected error: ${e.toString()}"),
           backgroundColor: Colors.red,
         ),
       );
-    } finally {
-      setState(() => isLoading = false);
     }
   }
 
@@ -194,6 +196,14 @@ class _SignUpPageState extends State<SignUpPage> {
       ),
       focusedBorder: OutlineInputBorder(
         borderSide: const BorderSide(color: Color(0xFF032540), width: 2.0),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderSide: const BorderSide(color: Colors.red, width: 1.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderSide: const BorderSide(color: Colors.red, width: 2.0),
         borderRadius: BorderRadius.circular(12),
       ),
     );
@@ -243,35 +253,31 @@ class _SignUpPageState extends State<SignUpPage> {
                           child: Text("Student"),
                         ),
                       ],
-                      onChanged:
-                          (value) => setState(() => selectedRole = value),
-                      validator:
-                          (value) =>
-                              value == null ? "Please select a role" : null,
+                      onChanged: (value) =>
+                          setState(() => selectedRole = value),
+                      validator: (value) =>
+                          value == null ? "Please select a role" : null,
                     ),
                     const SizedBox(height: 16),
 
-                    // ✅ Department Dropdown
+                    // Department Dropdown
                     DropdownButtonFormField<String>(
                       value: selectedDepartment,
                       decoration: _inputDecoration("Department"),
-                      items:
-                          departments.map((dept) {
-                            return DropdownMenuItem(
-                              value: dept,
-                              child: Text(dept),
-                            );
-                          }).toList(),
+                      items: departments.map((dept) {
+                        return DropdownMenuItem(
+                          value: dept,
+                          child: Text(dept),
+                        );
+                      }).toList(),
                       onChanged: (value) {
                         setState(() {
                           selectedDepartment = value;
                         });
                       },
-                      validator:
-                          (value) =>
-                              value == null
-                                  ? "Please select your department"
-                                  : null,
+                      validator: (value) => value == null
+                          ? "Please select your department"
+                          : null,
                     ),
                     const SizedBox(height: 16),
 
@@ -282,6 +288,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         "Email",
                         hint: "example@domain.com",
                       ),
+                      keyboardType: TextInputType.emailAddress,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return "Enter your email";
@@ -294,23 +301,21 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // ✅ ID Number Field (Manual numeric)
+                    // ID Number Field
                     TextFormField(
                       controller: idController,
                       decoration: _inputDecoration(
-                        "ID  Number",
-                        hint: "Enter assigned ID number(e.g. 21-03008 or 45/456)",
+                        "ID Number",
+                        hint: "Enter assigned ID number (e.g. 21-03008 or 45/456)",
                       ),
-                      keyboardType: TextInputType.text, // allows -, /
+                      keyboardType: TextInputType.text,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return "Enter your ID number";
                         }
-
                         if (!RegExp(r'^[0-9\-/]+$').hasMatch(value)) {
                           return "ID must contain only numbers, dashes (-), or slashes (/)";
                         }
-
                         return null;
                       },
                     ),
@@ -331,10 +336,9 @@ class _SignUpPageState extends State<SignUpPage> {
                                 : Icons.visibility_off,
                             color: const Color(0xFF032540),
                           ),
-                          onPressed:
-                              () => setState(
-                                () => isPasswordVisible = !isPasswordVisible,
-                              ),
+                          onPressed: () => setState(
+                            () => isPasswordVisible = !isPasswordVisible,
+                          ),
                         ),
                       ),
                       validator: (value) {
@@ -348,6 +352,7 @@ class _SignUpPageState extends State<SignUpPage> {
                       },
                     ),
 
+                    // Password Strength Indicator
                     if (passwordStrength.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Row(
@@ -356,10 +361,9 @@ class _SignUpPageState extends State<SignUpPage> {
                             "Strength: $passwordStrength",
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              color:
-                                  passwordStrength == "Weak"
-                                      ? Colors.red
-                                      : passwordStrength == "Medium"
+                              color: passwordStrength == "Weak"
+                                  ? Colors.red
+                                  : passwordStrength == "Medium"
                                       ? Colors.orange
                                       : Colors.green,
                             ),
@@ -383,11 +387,10 @@ class _SignUpPageState extends State<SignUpPage> {
                                 : Icons.visibility_off,
                             color: const Color(0xFF032540),
                           ),
-                          onPressed:
-                              () => setState(() {
-                                isConfirmPasswordVisible =
-                                    !isConfirmPasswordVisible;
-                              }),
+                          onPressed: () => setState(() {
+                            isConfirmPasswordVisible =
+                                !isConfirmPasswordVisible;
+                          }),
                         ),
                       ),
                       validator: (value) {
@@ -402,6 +405,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
+                    // Forgot Password
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
@@ -420,34 +424,62 @@ class _SignUpPageState extends State<SignUpPage> {
                     // Submit Button
                     isLoading
                         ? const CircularProgressIndicator(
-                          color: Color(0xFF032540),
-                        )
+                            color: Color(0xFF032540),
+                          )
                         : SizedBox(
-                          width: 170,
-                          height: 50,
-                          child: ElevatedButton(
-                            onPressed: handleSignUp,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF032540),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(50),
+                            width: 170,
+                            height: 50,
+                            child: ElevatedButton(
+                              onPressed: handleSignUp,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF032540),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(50),
+                                ),
+                                elevation: 0,
+                              ).copyWith(
+                                overlayColor: MaterialStateProperty.all(
+                                  Colors.white.withOpacity(0.2),
+                                ),
                               ),
-                              elevation: 0,
-                            ).copyWith(
-                              overlayColor: MaterialStateProperty.all(
-                                Colors.white.withOpacity(0.2),
-                              ),
-                            ),
-                            child: const Text(
-                              "Sign Up",
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
+                              child: const Text(
+                                "Sign Up",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
+
+                    // Already have account
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          "Already have an account? ",
+                          style: TextStyle(color: Color(0xFF032540)),
                         ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => const LoginPage()),
+                            );
+                          },
+                          child: const Text(
+                            "Login",
+                            style: TextStyle(
+                              color: Color(0xFF02AEEE),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),

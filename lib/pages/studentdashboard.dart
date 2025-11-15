@@ -36,8 +36,7 @@ class _StudentDashboardState extends State<StudentDashboard>
 
   // Change to StreamSubscription
   late StreamSubscription<List<Map<String, dynamic>>> _activitiesSubscription;
-  List<Map<String, dynamic>> studentActivities =
-      []; 
+  List<Map<String, dynamic>> studentActivities = [];
 
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
@@ -73,8 +72,6 @@ class _StudentDashboardState extends State<StudentDashboard>
 
   // New method to subscribe to live data
   void _subscribeToActivities() {
-
-    
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -90,19 +87,19 @@ class _StudentDashboardState extends State<StudentDashboard>
         setState(() {
           // Sort sessions by timestamp descending (most recent first)
           sessions.sort(
-            (a, b) => (b['timestamp'] as Timestamp? ?? Timestamp.now())
-                .compareTo(a['timestamp'] as Timestamp? ?? Timestamp.now()),
+            (a, b) => (b['submittedAt'] as Timestamp? ?? Timestamp.now())
+                .compareTo(a['submittedAt'] as Timestamp? ?? Timestamp.now()),
           );
 
           studentActivities = sessions
               .map(
                 (doc) => {
                   "date": doc['date'] ?? '',
-                  "hours": doc['hours'] ?? '',
+                  "hours": doc['hours'] ?? 0.0,
                   "status": doc['status'] ?? '',
-                  "description": doc['description'] ?? '',
-                  "timestamp":
-                      doc['timestamp'], // Keep timestamp for sorting/debugging
+                  "description":
+                      doc['reportDetails'] ?? '', // Updated field name
+                  "timestamp": doc['submittedAt'], // Updated field name
                 },
               )
               .toList();
@@ -122,19 +119,16 @@ class _StudentDashboardState extends State<StudentDashboard>
     final now = DateTime.now();
 
     for (var session in sessions) {
-      final hoursStr = session['hours'] ?? "00:00:00";
-      final parts = hoursStr.split(":");
-      double hours = 0;
-      if (parts.length == 3) {
-        hours = int.parse(parts[0]) +
-            int.parse(parts[1]) / 60 +
-            int.parse(parts[2]) / 3600;
-      }
+      final hours = session['hours'] ?? 0.0; // Now it's a number, not string
       total += hours;
 
-      final date = DateTime.tryParse(session['date'] ?? "") ?? now;
-      if (date.isAfter(now.subtract(const Duration(days: 7)))) {
-        weekTotal += hours;
+      // Calculate week total based on submittedAt timestamp
+      final submittedAt = session['submittedAt'] as Timestamp?;
+      if (submittedAt != null) {
+        final date = submittedAt.toDate();
+        if (date.isAfter(now.subtract(const Duration(days: 7)))) {
+          weekTotal += hours;
+        }
       }
     }
 
@@ -148,22 +142,14 @@ class _StudentDashboardState extends State<StudentDashboard>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-    if (!doc.exists) return;
+    // Use FirestoreHelper to get user profile
+    final userData = await FirestoreHelper.getUserProfile(user.uid);
+    if (userData == null) return;
 
-    final data = doc.data()!;
     setState(() {
-      ID = data['ID'] ?? "";
+      ID = userData['ID'] ?? "";
     });
-
-    // The calculation of totalHoursWorked and thisWeekHours is now handled by _subscribeToActivities
-    // which calls _calculateHours on every update.
   }
-
-  // Removed _loadRecentActivities as it's replaced by _subscribeToActivities
 
   void handleClockIn() {
     setState(() {
@@ -217,51 +203,38 @@ class _StudentDashboardState extends State<StudentDashboard>
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return; // Make sure user is signed in
 
-      final studentDocRef =
-          FirebaseFirestore.instance.collection('users').doc(user.uid);
-      final studentDoc = await studentDocRef.get();
-
-      if (!studentDoc.exists) return;
-
-      // Auto-create roleLower if missing
-      if (!studentDoc.data()!.containsKey('roleLower')) {
-        final role = studentDoc['role'] ?? '';
-        await studentDocRef.update({
-          'roleLower': role.toString().toLowerCase(),
-        });
-      }
-
-      final studentDepartment = studentDoc['department'];
-
-      // Case-insensitive supervisor query using roleLower
-      final supervisorQuery = await FirebaseFirestore.instance
-          .collection('users')
-          .where('roleLower', isEqualTo: 'supervisor')
-          .where('departmentLower', isEqualTo: studentDepartment.toLowerCase())
-          .limit(1)
-          .get();
-
-      if (supervisorQuery.docs.isEmpty) {
+      // Use FirestoreHelper to get user profile
+      final userData = await FirestoreHelper.getUserProfile(user.uid);
+      if (userData == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("No supervisor found for your department."),
+            content: Text("Error: User profile not found."),
           ),
         );
         return;
       }
 
-      final supervisorUid = supervisorQuery.docs.first.id;
+      final studentDepartment = userData['department'];
 
-      // Save work session
+      // Calculate hours from duration string (HH:MM:SS)
+      final parts = currentSessionDuration.split(':');
+      double hours = 0.0;
+      if (parts.length == 3) {
+        hours = int.parse(parts[0]) +
+            int.parse(parts[1]) / 60 +
+            int.parse(parts[2]) / 3600;
+      }
+
+      // Save work session using FirestoreHelper
       await FirestoreHelper.addWorkSession({
         'studentId': user.uid,
-        'supervisorId': supervisorUid,
         'department': studentDepartment,
         'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        'hours': currentSessionDuration,
-        'description': comment.trim(),
-        'status': 'pending',
-        'timestamp': FieldValue.serverTimestamp(),
+        'hours': hours, // Store as number instead of string
+        'reportDetails':
+            comment.trim(), // Updated field name to match security rules
+        'status': 'Pending', // Capitalized to match security rules
+        'submittedAt': FieldValue.serverTimestamp(), // Updated field name
       });
 
       setState(() {
@@ -284,7 +257,7 @@ class _StudentDashboardState extends State<StudentDashboard>
     }
   }
 
-// Updated to use FirestoreHelper.getAllWorkSessions()
+  // Updated to use FirestoreHelper.getAllWorkSessions()
   Future<void> exportExcel() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -304,9 +277,10 @@ class _StudentDashboardState extends State<StudentDashboard>
     for (var session in sessions) {
       sheet.appendRow([
         excel.TextCellValue(session["date"] ?? ''),
-        excel.TextCellValue(session["hours"]?.toString() ?? ''),
+        excel.TextCellValue(session["hours"]?.toStringAsFixed(2) ?? '0.00'),
         excel.TextCellValue(session["status"] ?? ''),
-        excel.TextCellValue(session["description"] ?? ''),
+        excel.TextCellValue(
+            session["reportDetails"] ?? ''), // Updated field name
       ]);
     }
 
@@ -356,9 +330,9 @@ class _StudentDashboardState extends State<StudentDashboard>
               data: sessions.map((e) {
                 return [
                   e["date"] ?? '',
-                  e["hours"].toString(),
+                  e["hours"]?.toStringAsFixed(2) ?? '0.00',
                   e["status"] ?? '',
-                  e["description"] ?? '',
+                  e["reportDetails"] ?? '', // Updated field name
                 ];
               }).toList(),
             ),
@@ -724,7 +698,8 @@ class _StudentDashboardState extends State<StudentDashboard>
   Widget _buildActivityCard(Color primaryColor, Color accentColor) {
     // Uses the new `studentActivities` list which is updated via the stream
     List<Map<String, dynamic>> filteredActivities = studentActivities
-        .where((activity) => activity["status"] == selectedActivityTab)
+        .where((activity) =>
+            activity["status"]?.toLowerCase() == selectedActivityTab)
         .toList();
 
     return Card(
@@ -762,7 +737,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                   onTap: () => setState(() => selectedActivityTab = 'approved'),
                 ),
                 _buildTabButton(
-                  label: 'Declined',
+                  label: 'Rejected',
                   color: Colors.red,
                   isSelected: selectedActivityTab == 'declined',
                   onTap: () => setState(() => selectedActivityTab = 'declined'),
@@ -818,18 +793,20 @@ class _StudentDashboardState extends State<StudentDashboard>
                                             vertical: 2,
                                           ),
                                           decoration: BoxDecoration(
-                                            color:
-                                                activity["status"] == "approved"
-                                                    ? Colors.green
-                                                    : activity["status"] ==
-                                                            "declined"
-                                                        ? Colors.red
-                                                        : Colors.orange,
+                                            color: activity["status"]
+                                                        ?.toLowerCase() ==
+                                                    "approved"
+                                                ? Colors.green
+                                                : activity["status"]
+                                                            ?.toLowerCase() ==
+                                                        "rejected"
+                                                    ? Colors.red
+                                                    : Colors.orange,
                                             borderRadius:
                                                 BorderRadius.circular(8),
                                           ),
                                           child: Text(
-                                            activity["status"],
+                                            activity["status"] ?? 'Pending',
                                             style: const TextStyle(
                                               color: Colors.white,
                                               fontSize: 12,
@@ -840,17 +817,19 @@ class _StudentDashboardState extends State<StudentDashboard>
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      activity["description"],
+                                      activity["description"] ?? '',
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w500,
                                         color: Color(0xFF032540),
                                       ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ],
                                 ),
                               ),
                               Text(
-                                "${activity["hours"]}h",
+                                "${activity["hours"]?.toStringAsFixed(1)}h",
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,

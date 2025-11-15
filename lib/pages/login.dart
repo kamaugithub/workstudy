@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart'; // ADD THIS
 
 import 'package:workstudy/pages/admindashboard.dart';
 import 'package:workstudy/pages/supervisordashboard.dart';
 import 'package:workstudy/pages/StudentDashboard.dart';
+import '../service/auth_service.dart'; // ADD THIS
 import 'signup.dart';
 import 'forgot_password.dart';
 
@@ -43,7 +45,11 @@ class _LoginPageState extends State<LoginPage> {
       UserCredential userCredential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
 
-      // 2️⃣ Try getting user data from Firestore (hybrid lookup)
+      // NEW: CHECK USER APPROVAL STATUS
+      final authService = Provider.of<AuthService>(context, listen: false);
+      await authService.checkUserApproval(userCredential.user!.uid);
+
+      // 2️⃣ Try getting user data from Firestore (your existing code)
       DocumentSnapshot doc =
           await FirebaseFirestore.instance
               .collection('users')
@@ -65,7 +71,14 @@ class _LoginPageState extends State<LoginPage> {
         await FirebaseFirestore.instance
             .collection('users')
             .doc(userCredential.user!.uid)
-            .set({'email': email, 'role': 'admin', 'name': 'Admin User'});
+            .set({
+              'email': email, 
+              'role': 'admin', 
+              'name': 'Admin User',
+              'status': 'approved', // NEW: Set admin as approved
+              'createdAt': DateTime.now().millisecondsSinceEpoch,
+              'updatedAt': DateTime.now().millisecondsSinceEpoch,
+            });
 
         role = 'admin';
       } else {
@@ -90,10 +103,22 @@ class _LoginPageState extends State<LoginPage> {
       });
     } on FirebaseAuthException catch (e) {
       setState(() => isLoading = false);
+      
+      // NEW: Handle approval-specific errors
+      String errorMessage;
+      if (e.code == 'pending-approval') {
+        errorMessage = 'Your account is pending admin approval. Please wait for approval.';
+      } else if (e.code == 'account-declined') {
+        errorMessage = e.message ?? 'Your account has been declined by admin.';
+      } else {
+        errorMessage = e.message ?? "Login failed. Please try again.";
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(e.message ?? "Login failed. Please try again."),
+          content: Text(errorMessage),
           backgroundColor: Colors.red,
+          duration: Duration(seconds: e.code == 'pending-approval' ? 5 : 3),
         ),
       );
     } catch (e) {
@@ -104,7 +129,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  /// ✅ Redirect user based on role
+  /// ✅ Redirect user based on role (your existing code remains same)
   void _navigateToDashboard(String role) {
     Widget targetPage;
 
@@ -122,6 +147,7 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  // YOUR EXISTING build METHOD REMAINS EXACTLY THE SAME
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);

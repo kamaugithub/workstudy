@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:workstudy/pages/login.dart';
+import 'package:provider/provider.dart';
+import 'package:workstudy/service/auth_service.dart';
 
-//import 'package:workstudy/update_users.dart';
-//import 'package:workstudy/auto_create_supervisors.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -19,32 +19,25 @@ class WorkStudyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Work Study',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
+    return MultiProvider(
+      providers: [
+        Provider<AuthService>(create: (_) => AuthService()),
+      ],
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Work Study',
+        theme: ThemeData(
+          fontFamily: 'Segoe UI',
+          primaryColor: const Color(0xFF3b82f6),
+          colorScheme: ColorScheme.fromSwatch().copyWith(
+            primary: const Color(0xFF3b82f6),
+            secondary: const Color(0xFFfacc15),
+          ),
+        ),
+        home: const LandingPage(),
       ),
-      home: const LoginPage(),
     );
   }
-}
-
-@override
-Widget build(BuildContext context) {
-  return MaterialApp(
-    title: 'WorkStudy',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      fontFamily: 'Segoe UI',
-      primaryColor: const Color(0xFF3b82f6),
-      colorScheme: ColorScheme.fromSwatch().copyWith(
-        primary: const Color(0xFF3b82f6),
-        secondary: const Color(0xFFfacc15),
-      ),
-    ),
-    home: const LandingPage(),
-  );
 }
 
 class LandingPage extends StatelessWidget {
