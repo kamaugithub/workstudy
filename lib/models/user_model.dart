@@ -68,6 +68,8 @@ class AppUser {
     if (timestamp is int) {
       return DateTime.fromMillisecondsSinceEpoch(timestamp);
     }
+
+    
     if (timestamp is Timestamp) {
       return timestamp.toDate();
     }
