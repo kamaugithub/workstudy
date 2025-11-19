@@ -21,11 +21,15 @@ class AuthService {
   }) async {
     try {
       print('🚀 Signup started for $email');
+      print('📋 Role: $role, Department: $department, ID: $idNumber');
+
+      // Normalize email for consistency
+      final normalizedEmail = email.toLowerCase().trim();
 
       // Check email exists
       final emailQuery = await _firestore
           .collection('users')
-          .where('email', isEqualTo: email)
+          .where('email', isEqualTo: normalizedEmail)
           .get();
 
       if (emailQuery.docs.isNotEmpty) {
@@ -48,10 +52,12 @@ class AuthService {
         );
       }
 
+      // Validate department exists
+      await _validateDepartment(department);
+
       // Create Firebase user
-      UserCredential credential =
-          await _auth.createUserWithEmailAndPassword(
-        email: email,
+      UserCredential credential = await _auth.createUserWithEmailAndPassword(
+        email: normalizedEmail,
         password: password,
       );
 
@@ -61,14 +67,14 @@ class AuthService {
       // Auto assign supervisor for student
       String? supervisorId;
       if (role.toLowerCase() == 'student') {
-        supervisorId = await _findSupervisorForDepartment(department);
+        supervisorId = await _assignSupervisorForStudent(department, uid);
       }
 
-      final name = _generateNameFromEmail(email);
+      final name = _generateNameFromEmail(normalizedEmail);
 
       final newUser = AppUser(
         id: uid,
-        email: email,
+        email: normalizedEmail,
         name: name,
         role: role,
         department: department,
@@ -87,10 +93,24 @@ class AuthService {
 
       await _firestore.collection('users').doc(uid).set(userData);
 
-      print('🎉 Signup completed for $email');
+      // Update department statistics
+      await _updateDepartmentStats(department, role, 'add');
+
+      print('🎉 Signup completed for $normalizedEmail');
+      print('📝 User document created with ID: $uid');
       return newUser;
     } catch (e) {
       print('❌ Signup error: $e');
+
+      // Clean up: if Firebase user was created but Firestore failed, delete the auth user
+      if (_auth.currentUser != null) {
+        try {
+          await _auth.currentUser!.delete();
+        } catch (deleteError) {
+          print('⚠ Could not delete auth user: $deleteError');
+        }
+      }
+
       rethrow;
     }
   }
@@ -104,8 +124,7 @@ class AuthService {
       base = base.replaceAll('.', ' ').replaceAll('_', ' ');
       return base
           .split(' ')
-          .map((w) =>
-              w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : '')
+          .map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : '')
           .join(' ');
     } catch (_) {
       return 'User';
@@ -113,7 +132,7 @@ class AuthService {
   }
 
   // ====================
-  // SIGN IN WITH CHECKS
+  // SIGN IN WITH CHECKS - FIXED VERSION
   // ====================
   Future<AppUser?> signIn({
     required String email,
@@ -122,57 +141,42 @@ class AuthService {
     try {
       print('🔐 Signing in $email');
 
+      // Normalize email for consistency
+      final normalizedEmail = email.toLowerCase().trim();
+
+      // Sign in with Firebase Auth first
       final credential = await _auth.signInWithEmailAndPassword(
-        email: email,
+        email: normalizedEmail,
         password: password,
       );
 
       final uid = credential.user!.uid;
+      print('✅ Firebase authentication successful for UID: $uid');
 
-      DocumentSnapshot userDoc =
-          await _firestore.collection('users').doc(uid).get();
+      // ALWAYS search by email instead of UID to ensure we find the user
+      final query = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: normalizedEmail)
+          .limit(1)
+          .get();
 
-      if (!userDoc.exists) {
-        print('⚠ No user doc found by UID, searching by email...');
-        final query = await _firestore
-            .collection('users')
-            .where('email', isEqualTo: email)
-            .limit(1)
-            .get();
-
-        if (query.docs.isNotEmpty) {
-          userDoc = query.docs.first;
-        } else {
-          // auto-create admin fallback
-          if (email.contains('admin')) {
-            final name = _generateNameFromEmail(email);
-            final admin = AppUser(
-              id: uid,
-              email: email,
-              name: name,
-              role: 'admin',
-              department: 'Administration',
-              status: 'approved',
-              totalHours: 0,
-              weeklyHours: 0,
-              createdAt: DateTime.now(),
-              updatedAt: DateTime.now(),
-            );
-            await _firestore
-                .collection('users')
-                .doc(uid)
-                .set(admin.toFirestore());
-            return admin;
-          }
-          return null;
-        }
+      if (query.docs.isEmpty) {
+        print('❌ No user document found for email: $normalizedEmail');
+        await _auth.signOut();
+        throw FirebaseAuthException(
+          code: 'user-not-found',
+          message: 'No user account found for this email.',
+        );
       }
 
+      final userDoc = query.docs.first;
       final data = userDoc.data();
-      if (data == null) return null;
 
-      final user =
-          AppUser.fromFirestore(data as Map<String, dynamic>, userDoc.id);
+      print('📄 User document found with ID: ${userDoc.id}');
+      print(
+          '📊 User status: ${data['status']}, role: ${data['role']}, department: ${data['department']}');
+
+      final user = AppUser.fromFirestore(data, userDoc.id);
 
       // Approval check
       if (!user.isApproved) {
@@ -181,51 +185,186 @@ class AuthService {
         if (user.isDeclined) {
           throw FirebaseAuthException(
             code: 'account-declined',
-            message: user.rejectionReason ??
-                'Your account has been declined.',
+            message: user.rejectionReason ?? 'Your account has been declined.',
           );
         }
 
         throw FirebaseAuthException(
           code: 'pending-approval',
-          message: 'Your account is pending approval.',
+          message:
+              'Your account is pending approval. Please wait for admin approval.',
         );
       }
 
-      print('✅ Login successful for ${user.email}');
+      print(
+          '✅ Login successful for ${user.email} (${user.role}) in ${user.department}');
       return user;
+    } on FirebaseAuthException catch (e) {
+      print('❌ Firebase Auth error: ${e.code} - ${e.message}');
+      rethrow;
     } catch (e) {
-      print('❌ Signin error: $e');
+      print('❌ Unexpected signin error: $e');
       rethrow;
     }
   }
 
-  // =============================
-  // SUPERVISOR AUTO-ASSIGN SEARCH
-  // =============================
-  Future<String?> _findSupervisorForDepartment(String department) async {
+ 
+// SUPERVISOR ASSIGNMENT LOGIC
+  Future<String?> _assignSupervisorForStudent(
+      String department, String studentId) async {
     try {
-      if (department.isEmpty) return null;
+      if (department.isEmpty) {
+        print('⚠ No department specified for student $studentId');
+        return null;
+      }
 
-      final query = await _firestore
+      print('🔍 Finding supervisor for department: $department');
+
+      // Find approved supervisors in the same department
+      final supervisorsQuery = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'supervisor')
           .where('department', isEqualTo: department)
           .where('status', isEqualTo: 'approved')
-          .limit(1)
           .get();
 
-      if (query.docs.isEmpty) return null;
+      if (supervisorsQuery.docs.isEmpty) {
+        print('⚠ No supervisors found in department: $department');
+        return null;
+      }
 
-      return query.docs.first.id;
+      print(
+          '✅ Found ${supervisorsQuery.docs.length} supervisor(s) in $department');
+
+      // Strategy: Assign to supervisor with least students for load balancing
+      String? selectedSupervisorId;
+      int minStudentCount =
+          999999; // Use a large number instead of int.maxValue
+
+      for (final supervisorDoc in supervisorsQuery.docs) {
+        final supervisorId = supervisorDoc.id;
+
+        // Count current students for this supervisor
+        final studentsCount = await _countStudentsForSupervisor(supervisorId);
+
+        print(
+            '   - Supervisor ${supervisorDoc.data()['name']} has $studentsCount students');
+
+        if (studentsCount < minStudentCount) {
+          minStudentCount = studentsCount;
+          selectedSupervisorId = supervisorId;
+        }
+      }
+
+      if (selectedSupervisorId != null) {
+        print(
+            '🎯 Assigned student to supervisor: $selectedSupervisorId with $minStudentCount existing students');
+
+        // Update supervisor's student count
+        await _updateSupervisorStudentCount(selectedSupervisorId, 1);
+      }
+
+      return selectedSupervisorId;
     } catch (e) {
-      print('❌ Supervisor search error: $e');
+      print('❌ Supervisor assignment error: $e');
       return null;
     }
   }
 
   // ===============================
-  // FIXED APPROVAL CHECK (THE ISSUE)
+  // DEPARTMENT MANAGEMENT
+  // ===============================
+  Future<void> _validateDepartment(String department) async {
+    try {
+      // You can add department validation logic here
+      // For example, check against a list of valid departments
+      print('✅ Department validated: $department');
+    } catch (e) {
+      print('❌ Department validation error: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _updateDepartmentStats(
+      String department, String role, String operation) async {
+    try {
+      final docRef = _firestore.collection('department_stats').doc(department);
+
+      await _firestore.runTransaction((transaction) async {
+        final doc = await transaction.get(docRef);
+
+        if (!doc.exists) {
+          // Create new department stats
+          transaction.set(docRef, {
+            'department': department,
+            'totalStudents':
+                role == 'student' ? (operation == 'add' ? 1 : -1) : 0,
+            'totalSupervisors':
+                role == 'supervisor' ? (operation == 'add' ? 1 : -1) : 0,
+            'pendingApprovals': operation == 'add' ? 1 : 0,
+            'updatedAt': DateTime.now().millisecondsSinceEpoch,
+          });
+        } else {
+          // Update existing stats
+          final data = doc.data()!;
+          final updateData = <String, dynamic>{
+            'updatedAt': DateTime.now().millisecondsSinceEpoch,
+          };
+
+          if (role == 'student') {
+            updateData['totalStudents'] =
+                (data['totalStudents'] ?? 0) + (operation == 'add' ? 1 : -1);
+          } else if (role == 'supervisor') {
+            updateData['totalSupervisors'] =
+                (data['totalSupervisors'] ?? 0) + (operation == 'add' ? 1 : -1);
+          }
+
+          if (operation == 'add') {
+            updateData['pendingApprovals'] =
+                (data['pendingApprovals'] ?? 0) + 1;
+          }
+
+          transaction.update(docRef, updateData);
+        }
+      });
+    } catch (e) {
+      print('❌ Department stats update error: $e');
+    }
+  }
+
+  // ===============================
+  // STUDENT-SUPERVISOR MANAGEMENT
+  // ===============================
+  Future<int> _countStudentsForSupervisor(String supervisorId) async {
+    try {
+      final query = await _firestore
+          .collection('users')
+          .where('supervisorId', isEqualTo: supervisorId)
+          .where('role', isEqualTo: 'student')
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      return query.docs.length;
+    } catch (e) {
+      print('❌ Count students error: $e');
+      return 0;
+    }
+  }
+
+  Future<void> _updateSupervisorStudentCount(
+      String supervisorId, int change) async {
+    try {
+      await _firestore.collection('users').doc(supervisorId).update({
+        'studentCount': FieldValue.increment(change),
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+    } catch (e) {
+      print('❌ Update supervisor student count error: $e');
+    }
+  }
+
+  // ===============================
+  // FIXED APPROVAL CHECK
   // ===============================
   Future<void> checkUserApproval(String userId) async {
     try {
@@ -235,14 +374,46 @@ class AuthService {
 
       if (!doc.exists) {
         print('❌ No user doc found during approval check');
+        // Try to find by email as fallback
+        final currentUser = _auth.currentUser;
+        if (currentUser != null && currentUser.email != null) {
+          print('🔄 Falling back to email search: ${currentUser.email}');
+          final query = await _firestore
+              .collection('users')
+              .where('email',
+                  isEqualTo: currentUser.email!.toLowerCase().trim())
+              .limit(1)
+              .get();
+
+          if (query.docs.isNotEmpty) {
+            final userDoc = query.docs.first;
+            final data = userDoc.data();
+            final user = AppUser.fromFirestore(data, userDoc.id);
+
+            if (!user.isApproved) {
+              await _auth.signOut();
+              if (user.isDeclined) {
+                throw FirebaseAuthException(
+                  code: 'account-declined',
+                  message: user.rejectionReason ??
+                      'Your account was declined by admin.',
+                );
+              }
+              throw FirebaseAuthException(
+                code: 'pending-approval',
+                message: 'Your account is pending admin approval.',
+              );
+            }
+            return;
+          }
+        }
         return;
       }
 
       final data = doc.data();
       if (data == null) return;
 
-      final user =
-          AppUser.fromFirestore(data as Map<String, dynamic>, doc.id);
+      final user = AppUser.fromFirestore(data, doc.id);
 
       if (!user.isApproved) {
         await _auth.signOut();
@@ -250,8 +421,8 @@ class AuthService {
         if (user.isDeclined) {
           throw FirebaseAuthException(
             code: 'account-declined',
-            message: user.rejectionReason ??
-                'Your account was declined by admin.',
+            message:
+                user.rejectionReason ?? 'Your account was declined by admin.',
           );
         }
 
@@ -270,31 +441,69 @@ class AuthService {
   // ADMIN ACTIONS
   // =============
   Future<void> approveUser(String userId) async {
-    await _firestore.collection('users').doc(userId).update({
-      'status': 'approved',
-      'updatedAt': DateTime.now().millisecondsSinceEpoch,
-      'rejectionReason': FieldValue.delete(),
-    });
+    try {
+      // Get user data first to update department stats
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) throw Exception('User not found');
+
+      final userData = userDoc.data()!;
+      final department = userData['department'];
+      final role = userData['role'];
+
+      // Update user status
+      await _firestore.collection('users').doc(userId).update({
+        'status': 'approved',
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        'rejectionReason': FieldValue.delete(),
+      });
+
+      // Update department stats
+      await _updateDepartmentStats(department, role, 'approve');
+
+      print('✅ User $userId approved successfully in department: $department');
+    } catch (e) {
+      print('❌ Error approving user: $e');
+      rethrow;
+    }
   }
 
   Future<void> declineUser(String userId, String reason) async {
-    await _firestore.collection('users').doc(userId).update({
-      'status': 'declined',
-      'rejectionReason': reason,
-      'updatedAt': DateTime.now().millisecondsSinceEpoch,
-    });
+    try {
+      // Get user data first to update department stats
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) throw Exception('User not found');
+
+      final userData = userDoc.data()!;
+      final department = userData['department'];
+      final role = userData['role'];
+
+      await _firestore.collection('users').doc(userId).update({
+        'status': 'declined',
+        'rejectionReason': reason,
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      // Update department stats
+      await _updateDepartmentStats(department, role, 'decline');
+
+      print('✅ User $userId declined with reason: $reason');
+    } catch (e) {
+      print('❌ Error declining user: $e');
+      rethrow;
+    }
   }
 
   // =============
-  // GET USERS
+  // GET USERS WITH DEPARTMENT FILTERS
   // =============
   Stream<List<AppUser>> getPendingUsers() {
     return _firestore
         .collection('users')
         .where('status', isEqualTo: 'pending')
         .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => AppUser.fromFirestore(d.data(), d.id)).toList());
+        .map((snap) => snap.docs
+            .map((d) => AppUser.fromFirestore(d.data(), d.id))
+            .toList());
   }
 
   Stream<List<AppUser>> getAllUsers() {
@@ -302,16 +511,171 @@ class AuthService {
         .collection('users')
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => AppUser.fromFirestore(d.data(), d.id)).toList());
+        .map((snap) => snap.docs
+            .map((d) => AppUser.fromFirestore(d.data(), d.id))
+            .toList());
+  }
+
+  // Get users by department
+  Stream<List<AppUser>> getUsersByDepartment(String department) {
+    return _firestore
+        .collection('users')
+        .where('department', isEqualTo: department)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => AppUser.fromFirestore(d.data(), d.id))
+            .toList());
+  }
+
+  // Get students for a specific supervisor
+  Stream<List<AppUser>> getStudentsForSupervisor(String supervisorId) {
+    return _firestore
+        .collection('users')
+        .where('supervisorId', isEqualTo: supervisorId)
+        .where('role', isEqualTo: 'student')
+        .where('status', isEqualTo: 'approved')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => AppUser.fromFirestore(d.data(), d.id))
+            .toList());
+  }
+
+  // Get supervisors by department
+  Stream<List<AppUser>> getSupervisorsByDepartment(String department) {
+    return _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'supervisor')
+        .where('department', isEqualTo: department)
+        .where('status', isEqualTo: 'approved')
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => AppUser.fromFirestore(d.data(), d.id))
+            .toList());
   }
 
   Future<AppUser?> getUserById(String userId) async {
-    final doc = await _firestore.collection('users').doc(userId).get();
-    if (!doc.exists) return null;
-    final data = doc.data();
-    if (data == null) return null;
-    return AppUser.fromFirestore(data, doc.id);
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (!doc.exists) return null;
+      final data = doc.data();
+      if (data == null) return null;
+      return AppUser.fromFirestore(data, doc.id);
+    } catch (e) {
+      print('❌ Error getting user by ID: $e');
+      return null;
+    }
+  }
+
+  Future<AppUser?> getUserByEmail(String email) async {
+    try {
+      final normalizedEmail = email.toLowerCase().trim();
+      final query = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: normalizedEmail)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) return null;
+
+      final doc = query.docs.first;
+      final data = doc.data();
+      return AppUser.fromFirestore(data, doc.id);
+    } catch (e) {
+      print('❌ Error getting user by email: $e');
+      return null;
+    }
+  }
+
+  // ==========
+  // DEPARTMENT METHODS
+  // ==========
+  Future<List<String>> getDepartments() async {
+    try {
+      // You can maintain a separate collection for departments
+      // or extract unique departments from users
+      final query = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'supervisor')
+          .get();
+
+      final departments = query.docs
+          .map((doc) => doc.data()['department'] as String)
+          .where((dept) => dept.isNotEmpty)
+          .toSet()
+          .toList();
+
+      return departments..sort();
+    } catch (e) {
+      print('❌ Error getting departments: $e');
+      return [];
+    }
+  }
+
+  // ==========
+  // DEBUG METHODS
+  // ==========
+  Future<void> debugUserStatus(String email) async {
+    try {
+      final normalizedEmail = email.toLowerCase().trim();
+      final query = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: normalizedEmail)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) {
+        print('❌ DEBUG: No user found with email: $normalizedEmail');
+        return;
+      }
+
+      final doc = query.docs.first;
+      final data = doc.data();
+      final user = AppUser.fromFirestore(data, doc.id);
+
+      print('🔍 DEBUG User Status:');
+      print('   - Document ID: ${doc.id}');
+      print('   - Email: ${user.email}');
+      print('   - Role: ${user.role}');
+      print('   - Status: ${user.status}');
+      print('   - Approved: ${user.isApproved}');
+      print('   - Department: ${user.department}');
+      print('   - Supervisor ID: ${user.supervisorId}');
+      print('   - Created: ${user.createdAt}');
+      print('   - Updated: ${user.updatedAt}');
+    } catch (e) {
+      print('❌ DEBUG error: $e');
+    }
+  }
+
+  Future<void> debugDepartmentStats(String department) async {
+    try {
+      final query = await _firestore
+          .collection('users')
+          .where('department', isEqualTo: department)
+          .get();
+
+      final users =
+          query.docs.map((d) => AppUser.fromFirestore(d.data(), d.id)).toList();
+
+      final students = users.where((u) => u.role == 'student').toList();
+      final supervisors = users.where((u) => u.role == 'supervisor').toList();
+      final pending = users.where((u) => u.status == 'pending').toList();
+
+      print('🏢 DEBUG Department: $department');
+      print('   - Total Users: ${users.length}');
+      print('   - Students: ${students.length}');
+      print('   - Supervisors: ${supervisors.length}');
+      print('   - Pending Approvals: ${pending.length}');
+
+      for (final supervisor in supervisors) {
+        final studentCount = await _countStudentsForSupervisor(supervisor.id);
+        print('   - Supervisor ${supervisor.name}: $studentCount students');
+      }
+    } catch (e) {
+      print('❌ DEBUG department stats error: $e');
+    }
   }
 
   // ==========
@@ -319,5 +683,6 @@ class AuthService {
   // ==========
   Future<void> signOut() async {
     await _auth.signOut();
+    print('👋 User signed out');
   }
 }

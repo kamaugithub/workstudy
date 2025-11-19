@@ -13,6 +13,7 @@ class AppUser {
   final DateTime updatedAt;
   final String? supervisorId;
   final String? rejectionReason;
+  final String? idNumber; // Add this field
 
   AppUser({
     required this.id,
@@ -27,6 +28,7 @@ class AppUser {
     required this.updatedAt,
     this.supervisorId,
     this.rejectionReason,
+    this.idNumber, // Add this
   });
 
   // Convert Firestore document to AppUser object
@@ -44,6 +46,7 @@ class AppUser {
       updatedAt: _parseTimestamp(data['updatedAt']),
       supervisorId: data['supervisorId'],
       rejectionReason: data['rejectionReason'],
+      idNumber: data['idNumber'], // Add this
     );
   }
 
@@ -61,6 +64,7 @@ class AppUser {
       'updatedAt': DateTime.now().millisecondsSinceEpoch,
       if (supervisorId != null) 'supervisorId': supervisorId,
       if (rejectionReason != null) 'rejectionReason': rejectionReason,
+      if (idNumber != null) 'idNumber': idNumber, // Add this
     };
   }
 
@@ -69,7 +73,6 @@ class AppUser {
       return DateTime.fromMillisecondsSinceEpoch(timestamp);
     }
 
-    
     if (timestamp is Timestamp) {
       return timestamp.toDate();
     }
@@ -80,7 +83,7 @@ class AppUser {
   bool get isStudent => role.toLowerCase() == 'student';
   bool get isSupervisor => role.toLowerCase() == 'supervisor';
   bool get isAdmin => role.toLowerCase() == 'admin';
-  
+
   bool get isApproved => status == 'approved';
   bool get isPending => status == 'pending';
   bool get isDeclined => status == 'declined';
