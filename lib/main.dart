@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Add this import
 import 'firebase_options.dart';
 import 'package:workstudy/pages/login.dart';
+import 'package:workstudy/pages/admindashboard.dart';
+import 'package:workstudy/pages/studentdashboard.dart';
+import 'package:workstudy/pages/supervisordashboard.dart';
 import 'package:provider/provider.dart';
 import 'package:workstudy/service/auth_service.dart';
+import 'package:workstudy/models/user_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +26,10 @@ class WorkStudyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        Provider<AuthService>(create: (_) => AuthService()),
+        Provider<AuthService>(
+          create: (_) => AuthService(),
+          lazy: false,
+        ),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -34,7 +42,113 @@ class WorkStudyApp extends StatelessWidget {
             secondary: const Color(0xFFfacc15),
           ),
         ),
-        home: const LandingPage(),
+        home: const AuthWrapper(),
+      ),
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authService = Provider.of<AuthService>(context);
+
+    return StreamBuilder<User?>(
+      // Now User is imported from firebase_auth
+      stream: authService.authStateChanges,
+      builder: (context, snapshot) {
+        // Show loading while checking auth state
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        // If user is logged in, check their approval status
+        if (snapshot.hasData && snapshot.data != null) {
+          return FutureBuilder<AppUser?>(
+            future: authService.getUserById(snapshot.data!.uid),
+            builder: (context, userSnapshot) {
+              if (userSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              if (userSnapshot.hasError) {
+                print('Error fetching user: ${userSnapshot.error}');
+                // If there's an error, go to login
+                return const LandingPage();
+              }
+
+              if (userSnapshot.hasData && userSnapshot.data != null) {
+                final user = userSnapshot.data!;
+
+                // Check if user is approved
+                if (user.isApproved) {
+                  // User is approved, show appropriate dashboard based on role
+                  if (user.isStudent) {
+                    return const StudentDashboard(); // Remove user parameter
+                  } else if (user.isSupervisor) {
+                    return const SupervisorDashboard(); // Remove user parameter
+                  } else if (user.isAdmin) {
+                    return const AdminDashboard(); // Remove user parameter
+                  }
+                } else {
+                  // User is not approved, show pending approval screen
+                  return const PendingApprovalScreen();
+                }
+              }
+
+              // Fallback to landing page
+              return const LandingPage();
+            },
+          );
+        }
+
+        // User is not logged in, show landing page
+        return const LandingPage();
+      },
+    );
+  }
+}
+
+class PendingApprovalScreen extends StatelessWidget {
+  const PendingApprovalScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.hourglass_empty, size: 64, color: Colors.orange[300]),
+            const SizedBox(height: 20),
+            const Text(
+              'Pending Approval',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Your account is waiting for administrator approval.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Provider.of<AuthService>(context, listen: false).signOut();
+              },
+              child: const Text('Sign Out'),
+            ),
+          ],
+        ),
       ),
     );
   }

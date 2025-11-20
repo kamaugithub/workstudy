@@ -76,7 +76,7 @@ class AuthService {
         id: uid,
         email: normalizedEmail,
         name: name,
-        role: role,
+        role: role.toLowerCase(), // Convert to lowercase for consistency
         department: department,
         status: 'pending',
         totalHours: 0,
@@ -208,8 +208,7 @@ class AuthService {
     }
   }
 
- 
-// SUPERVISOR ASSIGNMENT LOGIC
+  // SUPERVISOR ASSIGNMENT LOGIC - FIXED VERSION
   Future<String?> _assignSupervisorForStudent(
       String department, String studentId) async {
     try {
@@ -220,35 +219,72 @@ class AuthService {
 
       print('🔍 Finding supervisor for department: $department');
 
-      // Find approved supervisors in the same department
-      final supervisorsQuery = await _firestore
+      // DEBUG: First let's see ALL users in this department
+      final allDeptUsers = await _firestore
           .collection('users')
-          .where('role', isEqualTo: 'supervisor')
+          .where('department', isEqualTo: department)
+          .get();
+
+      print('📊 DEBUG - All users in $department:');
+      for (final doc in allDeptUsers.docs) {
+        final data = doc.data();
+        print(
+            '   - ${data['name']} (${data['email']}): ${data['role']} - ${data['status']} - ID: ${doc.id}');
+      }
+
+      // FIX: Get all approved users in department and filter for supervisors manually
+      final approvedUsersQuery = await _firestore
+          .collection('users')
           .where('department', isEqualTo: department)
           .where('status', isEqualTo: 'approved')
           .get();
 
-      if (supervisorsQuery.docs.isEmpty) {
-        print('⚠ No supervisors found in department: $department');
+      // Manual filtering to handle case sensitivity in role field
+      final approvedSupervisors = approvedUsersQuery.docs.where((doc) {
+        final role = doc.data()['role']?.toString().toLowerCase();
+        return role == 'supervisor';
+      }).toList();
+
+      print(
+          '✅ Found ${approvedSupervisors.length} approved supervisor(s) in $department');
+
+      if (approvedSupervisors.isEmpty) {
+        print('❌ No approved supervisors found. Checking data issues...');
+
+        // Check if there are any supervisors with different status
+        final allDeptUsers = await _firestore
+            .collection('users')
+            .where('department', isEqualTo: department)
+            .get();
+
+        // Manual filtering for supervisors with any status
+        final allSupervisors = allDeptUsers.docs.where((doc) {
+          final role = doc.data()['role']?.toString().toLowerCase();
+          return role == 'supervisor';
+        }).toList();
+
+        print('🔍 Supervisors with any status: ${allSupervisors.length}');
+        for (final doc in allSupervisors) {
+          final data = doc.data();
+          print(
+              '   - ${data['name']}: status = ${data['status']}, role = ${data['role']}');
+        }
         return null;
       }
 
-      print(
-          '✅ Found ${supervisorsQuery.docs.length} supervisor(s) in $department');
-
       // Strategy: Assign to supervisor with least students for load balancing
       String? selectedSupervisorId;
-      int minStudentCount =
-          999999; // Use a large number instead of int.maxValue
+      int minStudentCount = 999999;
 
-      for (final supervisorDoc in supervisorsQuery.docs) {
+      for (final supervisorDoc in approvedSupervisors) {
         final supervisorId = supervisorDoc.id;
+        final supervisorData = supervisorDoc.data();
 
         // Count current students for this supervisor
         final studentsCount = await _countStudentsForSupervisor(supervisorId);
 
         print(
-            '   - Supervisor ${supervisorDoc.data()['name']} has $studentsCount students');
+            '   - Supervisor ${supervisorData['name']} (${supervisorData['email']}) has $studentsCount students');
 
         if (studentsCount < minStudentCount) {
           minStudentCount = studentsCount;
@@ -297,10 +333,12 @@ class AuthService {
           // Create new department stats
           transaction.set(docRef, {
             'department': department,
-            'totalStudents':
-                role == 'student' ? (operation == 'add' ? 1 : -1) : 0,
-            'totalSupervisors':
-                role == 'supervisor' ? (operation == 'add' ? 1 : -1) : 0,
+            'totalStudents': role.toLowerCase() == 'student'
+                ? (operation == 'add' ? 1 : -1)
+                : 0,
+            'totalSupervisors': role.toLowerCase() == 'supervisor'
+                ? (operation == 'add' ? 1 : -1)
+                : 0,
             'pendingApprovals': operation == 'add' ? 1 : 0,
             'updatedAt': DateTime.now().millisecondsSinceEpoch,
           });
@@ -311,10 +349,10 @@ class AuthService {
             'updatedAt': DateTime.now().millisecondsSinceEpoch,
           };
 
-          if (role == 'student') {
+          if (role.toLowerCase() == 'student') {
             updateData['totalStudents'] =
                 (data['totalStudents'] ?? 0) + (operation == 'add' ? 1 : -1);
-          } else if (role == 'supervisor') {
+          } else if (role.toLowerCase() == 'supervisor') {
             updateData['totalSupervisors'] =
                 (data['totalSupervisors'] ?? 0) + (operation == 'add' ? 1 : -1);
           }

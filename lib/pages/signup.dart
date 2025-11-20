@@ -28,7 +28,6 @@ class _SignUpPageState extends State<SignUpPage> {
   bool isConfirmPasswordVisible = false;
   bool isLoading = false;
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   final List<String> departments = [
@@ -52,6 +51,7 @@ class _SignUpPageState extends State<SignUpPage> {
 
   Future<void> handleSignUp() async {
     if (!_formKey.currentState!.validate()) return;
+
     setState(() => isLoading = true);
 
     try {
@@ -78,11 +78,10 @@ class _SignUpPageState extends State<SignUpPage> {
         return;
       }
 
-      // NEW: Check if email exists using AuthService
-      final authService = Provider.of<AuthService>(context, listen: false);
-      
       // Create Firebase user using AuthService
-      final user = await authService.signUp(
+      final authService = Provider.of<AuthService>(context, listen: false);
+
+      await authService.signUp(
         email: email,
         password: password,
         role: role,
@@ -98,10 +97,9 @@ class _SignUpPageState extends State<SignUpPage> {
           builder: (context) => AlertDialog(
             title: const Text('Registration Successful'),
             content: const Text(
-              'Your account has been created and is pending admin approval. '
-              'You will be able to login once approved. '
-              'Thank you.'
-            ),
+                'Your account has been created and is pending admin approval. '
+                'You will be able to login once approved. '
+                'Thank you.'),
             actions: [
               TextButton(
                 onPressed: () {
@@ -122,8 +120,6 @@ class _SignUpPageState extends State<SignUpPage> {
       String message;
       switch (e.code) {
         case 'email-already-in-use':
-          message = "This email is already registered.";
-          break;
         case 'email-already-exists':
           message = "This email is already registered.";
           break;
@@ -139,17 +135,21 @@ class _SignUpPageState extends State<SignUpPage> {
         default:
           message = "Signup failed: ${e.message}";
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.red),
+        );
+      }
     } catch (e) {
       setState(() => isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Unexpected error: ${e.toString()}"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Unexpected error: ${e.toString()}"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -207,6 +207,15 @@ class _SignUpPageState extends State<SignUpPage> {
         borderRadius: BorderRadius.circular(12),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    idController.dispose();
+    emailController.dispose();
+    passwordController.dispose();
+    confirmPasswordController.dispose();
+    super.dispose();
   }
 
   @override
@@ -306,7 +315,8 @@ class _SignUpPageState extends State<SignUpPage> {
                       controller: idController,
                       decoration: _inputDecoration(
                         "ID Number",
-                        hint: "Enter assigned ID number (e.g. 21-03008 or 45/456)",
+                        hint:
+                            "Enter assigned ID number (e.g. 21-03008 or 45/456)",
                       ),
                       keyboardType: TextInputType.text,
                       validator: (value) {

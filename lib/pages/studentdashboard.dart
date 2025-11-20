@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:workstudy/export_helper/firestore_helper.dart'; // Keep this import
+import 'package:workstudy/export_helper/firestore_helper.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -35,7 +35,7 @@ class _StudentDashboardState extends State<StudentDashboard>
   double thisWeekHours = 0.0;
 
   // Change to StreamSubscription
-  late StreamSubscription<List<Map<String, dynamic>>> _activitiesSubscription;
+  late StreamSubscription<List<Map<String, dynamic>>>? _activitiesSubscription;
   List<Map<String, dynamic>> studentActivities = [];
 
   late AnimationController _titleController;
@@ -66,50 +66,68 @@ class _StudentDashboardState extends State<StudentDashboard>
   void dispose() {
     _titleController.dispose();
     if (timer.isActive) timer.cancel();
-    _activitiesSubscription.cancel(); // Cancel the subscription
+    _activitiesSubscription?.cancel(); // Cancel the subscription safely
     super.dispose();
   }
 
   // New method to subscribe to live data
   void _subscribeToActivities() {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null || user.uid.isEmpty) {
+      print('❌ No valid user ID for activities subscription');
+      return;
+    }
 
-    // Use FirestoreHelper to get a stream of student's activities
-    _activitiesSubscription = FirestoreHelper.getStudentWorkSessionsStream(
-      user.uid,
-    ).listen(
-      (sessions) {
-        // Recalculate totals on every update
-        _calculateHours(sessions);
+    try {
+      // Use FirestoreHelper to get a stream of student's activities
+      _activitiesSubscription = FirestoreHelper.getStudentWorkSessionsStream(
+        user.uid,
+      ).listen(
+        (sessions) {
+          // Recalculate totals on every update
+          _calculateHours(sessions);
 
-        // Update the main list for the Activity Card
-        setState(() {
-          // Sort sessions by timestamp descending (most recent first)
-          sessions.sort(
-            (a, b) => (b['submittedAt'] as Timestamp? ?? Timestamp.now())
-                .compareTo(a['submittedAt'] as Timestamp? ?? Timestamp.now()),
-          );
+          // Update the main list for the Activity Card
+          if (mounted) {
+            setState(() {
+              // Sort sessions by timestamp descending (most recent first)
+              sessions.sort(
+                (a, b) => (b['submittedAt'] as Timestamp? ?? Timestamp.now())
+                    .compareTo(
+                        a['submittedAt'] as Timestamp? ?? Timestamp.now()),
+              );
 
-          studentActivities = sessions
-              .map(
-                (doc) => {
-                  "date": doc['date'] ?? '',
-                  "hours": doc['hours'] ?? 0.0,
-                  "status": doc['status'] ?? '',
-                  "description":
-                      doc['reportDetails'] ?? '', // Updated field name
-                  "timestamp": doc['submittedAt'], // Updated field name
-                },
-              )
-              .toList();
-        });
-      },
-      onError: (error) {
-        // Handle error
-        print("Error fetching activities stream: $error");
-      },
-    );
+              studentActivities = sessions
+                  .map(
+                    (doc) => {
+                      "date": doc['date'] ?? '',
+                      "hours": doc['hours'] ?? 0.0,
+                      "status": doc['status'] ?? '',
+                      "description":
+                          doc['reportDetails'] ?? '', // Updated field name
+                      "timestamp": doc['submittedAt'], // Updated field name
+                    },
+                  )
+                  .toList();
+            });
+          }
+        },
+        onError: (error) {
+          // Handle error
+          print("Error fetching activities stream: $error");
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("Error loading activities: $error"),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        },
+      );
+    } catch (e) {
+      print('❌ Error setting up activities subscription: $e');
+    }
   }
 
   // Combine hour calculation logic into a single function to be called by both _loadStudentData and _subscribeToActivities
@@ -132,23 +150,31 @@ class _StudentDashboardState extends State<StudentDashboard>
       }
     }
 
-    setState(() {
-      totalHoursWorked = total;
-      thisWeekHours = weekTotal;
-    });
+    if (mounted) {
+      setState(() {
+        totalHoursWorked = total;
+        thisWeekHours = weekTotal;
+      });
+    }
   }
 
   Future<void> _loadStudentData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // Use FirestoreHelper to get user profile
-    final userData = await FirestoreHelper.getUserProfile(user.uid);
-    if (userData == null) return;
+    try {
+      // Use FirestoreHelper to get user profile
+      final userData = await FirestoreHelper.getUserProfile(user.uid);
+      if (userData == null) return;
 
-    setState(() {
-      ID = userData['ID'] ?? "";
-    });
+      if (mounted) {
+        setState(() {
+          ID = userData['ID'] ?? "";
+        });
+      }
+    } catch (e) {
+      print('❌ Error loading student data: $e');
+    }
   }
 
   void handleClockIn() {
@@ -158,10 +184,12 @@ class _StudentDashboardState extends State<StudentDashboard>
       currentSessionDuration = "00:00:00";
     });
     timer = Timer.periodic(const Duration(seconds: 1), (Timer t) {
-      setState(() {
-        final duration = DateTime.now().difference(startTime);
-        currentSessionDuration = formatDuration(duration);
-      });
+      if (mounted) {
+        setState(() {
+          final duration = DateTime.now().difference(startTime);
+          currentSessionDuration = formatDuration(duration);
+        });
+      }
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -172,9 +200,11 @@ class _StudentDashboardState extends State<StudentDashboard>
 
   void handleClockOut() {
     if (timer.isActive) timer.cancel();
-    setState(() {
-      isSessionActive = false;
-    });
+    if (mounted) {
+      setState(() {
+        isSessionActive = false;
+      });
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Session Ended. Add description and submit."),
@@ -237,11 +267,13 @@ class _StudentDashboardState extends State<StudentDashboard>
         'submittedAt': FieldValue.serverTimestamp(), // Updated field name
       });
 
-      setState(() {
-        comment = "";
-        isSessionActive = false;
-        currentSessionDuration = "00:00:00";
-      });
+      if (mounted) {
+        setState(() {
+          comment = "";
+          isSessionActive = false;
+          currentSessionDuration = "00:00:00";
+        });
+      }
 
       if (timer.isActive) timer.cancel();
 
@@ -262,45 +294,54 @@ class _StudentDashboardState extends State<StudentDashboard>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // Fetch live data for export
-    final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
+    try {
+      // Fetch live data for export
+      final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
 
-    final workbook = excel.Excel.createExcel();
-    final sheet = workbook['Report'];
-    sheet.appendRow([
-      excel.TextCellValue("Date"),
-      excel.TextCellValue("Hours"),
-      excel.TextCellValue("Status"),
-      excel.TextCellValue("Description"),
-    ]);
-
-    for (var session in sessions) {
+      final workbook = excel.Excel.createExcel();
+      final sheet = workbook['Report'];
       sheet.appendRow([
-        excel.TextCellValue(session["date"] ?? ''),
-        excel.TextCellValue(session["hours"]?.toStringAsFixed(2) ?? '0.00'),
-        excel.TextCellValue(session["status"] ?? ''),
-        excel.TextCellValue(
-            session["reportDetails"] ?? ''), // Updated field name
+        excel.TextCellValue("Date"),
+        excel.TextCellValue("Hours"),
+        excel.TextCellValue("Status"),
+        excel.TextCellValue("Description"),
       ]);
+
+      for (var session in sessions) {
+        sheet.appendRow([
+          excel.TextCellValue(session["date"] ?? ''),
+          excel.TextCellValue(session["hours"]?.toStringAsFixed(2) ?? '0.00'),
+          excel.TextCellValue(session["status"] ?? ''),
+          excel.TextCellValue(
+              session["reportDetails"] ?? ''), // Updated field name
+        ]);
+      }
+
+      final bytes = workbook.encode();
+      if (bytes == null) return;
+
+      const fileName = "workstudy_report.xlsx";
+      String message;
+
+      if (kIsWeb) {
+        saveFileWeb(Uint8List.fromList(bytes), fileName);
+        message = "✅ Excel file download initiated.";
+      } else {
+        final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
+        message = "✅ Excel exported to: $path";
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error exporting Excel: $e")),
+        );
+      }
     }
-
-    final bytes = workbook.encode();
-    if (bytes == null) return;
-
-    const fileName = "workstudy_report.xlsx";
-    String message;
-
-    if (kIsWeb) {
-      saveFileWeb(Uint8List.fromList(bytes), fileName);
-      message = "✅ Excel file download initiated.";
-    } else {
-      final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
-      message = "✅ Excel exported to: $path";
-    }
-
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // Updated to use FirestoreHelper.getAllWorkSessions()
@@ -308,54 +349,63 @@ class _StudentDashboardState extends State<StudentDashboard>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // Fetch live data for export
-    final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
+    try {
+      // Fetch live data for export
+      final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
 
-    final pdf = pw.Document();
-    pdf.addPage(
-      pw.Page(
-        build: (context) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(
-              "WorkStudy Report",
-              style: pw.TextStyle(
-                fontSize: 22,
-                fontWeight: pw.FontWeight.bold,
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.Page(
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                "WorkStudy Report",
+                style: pw.TextStyle(
+                  fontSize: 22,
+                  fontWeight: pw.FontWeight.bold,
+                ),
               ),
-            ),
-            pw.SizedBox(height: 10),
-            pw.Table.fromTextArray(
-              headers: ["Date", "Hours", "Status", "Description"],
-              data: sessions.map((e) {
-                return [
-                  e["date"] ?? '',
-                  e["hours"]?.toStringAsFixed(2) ?? '0.00',
-                  e["status"] ?? '',
-                  e["reportDetails"] ?? '', // Updated field name
-                ];
-              }).toList(),
-            ),
-          ],
+              pw.SizedBox(height: 10),
+              pw.Table.fromTextArray(
+                headers: ["Date", "Hours", "Status", "Description"],
+                data: sessions.map((e) {
+                  return [
+                    e["date"] ?? '',
+                    e["hours"]?.toStringAsFixed(2) ?? '0.00',
+                    e["status"] ?? '',
+                    e["reportDetails"] ?? '', // Updated field name
+                  ];
+                }).toList(),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
 
-    final bytes = await pdf.save();
-    const fileName = "workstudy_report.pdf";
-    String message;
+      final bytes = await pdf.save();
+      const fileName = "workstudy_report.pdf";
+      String message;
 
-    if (kIsWeb) {
-      saveFileWeb(bytes, fileName);
-      message = "✅ PDF file download initiated.";
-    } else {
-      final path = await saveFileOther(bytes, fileName);
-      message = "✅ PDF exported to: $path";
+      if (kIsWeb) {
+        saveFileWeb(bytes, fileName);
+        message = "✅ PDF file download initiated.";
+      } else {
+        final path = await saveFileOther(bytes, fileName);
+        message = "✅ PDF exported to: $path";
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error exporting PDF: $e")),
+        );
+      }
     }
-
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override

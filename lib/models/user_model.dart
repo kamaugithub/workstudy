@@ -13,7 +13,7 @@ class AppUser {
   final DateTime updatedAt;
   final String? supervisorId;
   final String? rejectionReason;
-  final String? idNumber; // Add this field
+  final String? idNumber;
 
   AppUser({
     required this.id,
@@ -28,25 +28,25 @@ class AppUser {
     required this.updatedAt,
     this.supervisorId,
     this.rejectionReason,
-    this.idNumber, // Add this
+    this.idNumber,
   });
 
   // Convert Firestore document to AppUser object
   factory AppUser.fromFirestore(Map<String, dynamic> data, String documentId) {
     return AppUser(
       id: documentId,
-      email: data['email'] ?? '',
-      name: data['name'] ?? '',
-      role: data['role'] ?? '',
-      department: data['department'] ?? '',
-      status: data['status'] ?? 'pending',
-      totalHours: (data['totalHours'] ?? 0).toDouble(),
-      weeklyHours: (data['weeklyHours'] ?? 0).toDouble(),
+      email: data['email']?.toString() ?? '',
+      name: data['name']?.toString() ?? '',
+      role: data['role']?.toString() ?? '',
+      department: data['department']?.toString() ?? '',
+      status: data['status']?.toString() ?? 'pending',
+      totalHours: _parseDouble(data['totalHours']),
+      weeklyHours: _parseDouble(data['weeklyHours']),
       createdAt: _parseTimestamp(data['createdAt']),
       updatedAt: _parseTimestamp(data['updatedAt']),
-      supervisorId: data['supervisorId'],
-      rejectionReason: data['rejectionReason'],
-      idNumber: data['idNumber'], // Add this
+      supervisorId: data['supervisorId']?.toString(),
+      rejectionReason: data['rejectionReason']?.toString(),
+      idNumber: data['idNumber']?.toString(),
     );
   }
 
@@ -64,11 +64,15 @@ class AppUser {
       'updatedAt': DateTime.now().millisecondsSinceEpoch,
       if (supervisorId != null) 'supervisorId': supervisorId,
       if (rejectionReason != null) 'rejectionReason': rejectionReason,
-      if (idNumber != null) 'idNumber': idNumber, // Add this
+      if (idNumber != null) 'idNumber': idNumber,
     };
   }
 
   static DateTime _parseTimestamp(dynamic timestamp) {
+    if (timestamp == null) {
+      return DateTime.now();
+    }
+
     if (timestamp is int) {
       return DateTime.fromMillisecondsSinceEpoch(timestamp);
     }
@@ -76,7 +80,25 @@ class AppUser {
     if (timestamp is Timestamp) {
       return timestamp.toDate();
     }
+
+    if (timestamp is DateTime) {
+      return timestamp;
+    }
+
+    // Try to parse as string if needed
+    if (timestamp is String) {
+      return DateTime.tryParse(timestamp) ?? DateTime.now();
+    }
+
     return DateTime.now();
+  }
+
+  static double _parseDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
   }
 
   // Helper methods for approval system
