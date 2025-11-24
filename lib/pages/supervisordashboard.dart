@@ -36,7 +36,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
   // Firestore instance
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Animation controllers for the header title (KEPT as requested)
+  // Animation controllers for the header title
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
   late Animation<double> _verticalMovement;
@@ -84,31 +84,23 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       return Stream.value([]);
     }
 
-    // Updated to match your Firestore structure and security rules
+    // Fixed: Using direct collection path that matches the existing index
     return _firestore
-        .collection('artifacts')
-        .doc('workstudy-bcda5')
-        .collection('public/data/work_sessions')
-        .where('department',
-            isEqualTo:
-                supervisorDepartment) // Filter by supervisor's department
-        .orderBy('submittedAt', descending: true) // Updated field name
+        .collection('work_sessions') // Direct collection path
+        .where('department', isEqualTo: supervisorDepartment)
+        .orderBy('submittedAt', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs.map((doc) {
               final data = doc.data();
               return {
                 'id': doc.id,
                 'studentId': data['studentId'] ?? '',
-                'student': data['studentName'] ??
-                    'Unknown Student', // You might want to fetch student name separately
-                'hours': data['hours'] ?? 0.0, // Now a number
-                'status': data['status']?.toLowerCase() ??
-                    'pending', // Ensure lowercase for filtering
-                'description':
-                    data['reportDetails'] ?? '', // Updated field name
-                'timestamp':
-                    data['submittedAt'] as Timestamp?, // Updated field name
-                'date': data['date'] ?? '', // Use the stored date field
+                'student': data['studentName'] ?? 'Unknown Student',
+                'hours': data['hours'] ?? 0.0,
+                'status': data['status']?.toLowerCase() ?? 'pending',
+                'description': data['reportDetails'] ?? '',
+                'timestamp': data['submittedAt'] as Timestamp?,
+                'date': data['date'] ?? '',
                 'department': data['department'] ?? '',
               };
             }).toList());
@@ -160,79 +152,96 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
 
   Future<void> _exportExcel(
       String reportType, List<Map<String, dynamic>> activities) async {
-    final workbook = excel.Excel.createExcel();
-    final sheet = workbook['$reportType Report'];
-    final data = _getReportData(activities);
+    try {
+      final workbook = excel.Excel.createExcel();
+      final sheet = workbook['$reportType Report'];
+      final data = _getReportData(activities);
 
-    for (var row in data) {
-      sheet.appendRow(row);
-    }
+      for (var row in data) {
+        sheet.appendRow(row);
+      }
 
-    final bytes = workbook.encode();
-    if (bytes == null) return;
+      final bytes = workbook.encode();
+      if (bytes == null) return;
 
-    final fileName =
-        "workstudy_supervisor_${reportType.toLowerCase()}_report.xlsx";
-    String message;
+      final fileName =
+          "workstudy_supervisor_${reportType.toLowerCase()}_report.xlsx";
+      String message;
 
-    if (kIsWeb) {
-      saveFileWeb(Uint8List.fromList(bytes), fileName);
-      message = "✅ $reportType Excel download initiated.";
-    } else {
-      final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
-      message = "✅ $reportType Excel exported to: $path";
-    }
+      if (kIsWeb) {
+        saveFileWeb(Uint8List.fromList(bytes), fileName);
+        message = "✅ $reportType Excel download initiated.";
+      } else {
+        final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
+        message = "✅ $reportType Excel exported to: $path";
+      }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Export failed: $e")),
+        );
+      }
     }
   }
 
   Future<void> _exportPDF(
       String reportType, List<Map<String, dynamic>> activities) async {
-    final pdf = pw.Document();
-    final data = _getReportData(activities)
-        .map((row) => row.map((e) => e.toString()).toList())
-        .toList();
-    final headers = data.removeAt(0);
+    try {
+      final pdf = pw.Document();
+      final data = _getReportData(activities)
+          .map((row) => row.map((e) => e.toString()).toList())
+          .toList();
+      final headers = data.removeAt(0);
 
-    pdf.addPage(
-      pw.Page(
-        build: (context) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(
-              "WorkStudy $reportType Report",
-              style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.SizedBox(height: 10),
-            pw.Table.fromTextArray(headers: headers, data: data),
-          ],
+      pdf.addPage(
+        pw.Page(
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                "WorkStudy $reportType Report",
+                style:
+                    pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Table.fromTextArray(headers: headers, data: data),
+            ],
+          ),
         ),
-      ),
-    );
+      );
 
-    final bytes = await pdf.save();
-    final fileName =
-        "workstudy_supervisor_${reportType.toLowerCase()}_report.pdf";
-    String message;
+      final bytes = await pdf.save();
+      final fileName =
+          "workstudy_supervisor_${reportType.toLowerCase()}_report.pdf";
+      String message;
 
-    if (kIsWeb) {
-      saveFileWeb(bytes, fileName);
-      message = "✅ $reportType PDF download initiated.";
-    } else {
-      final path = await saveFileOther(bytes, fileName);
-      message = "✅ $reportType PDF exported to: $path";
-    }
+      if (kIsWeb) {
+        saveFileWeb(bytes, fileName);
+        message = "✅ $reportType PDF download initiated.";
+      } else {
+        final path = await saveFileOther(bytes, fileName);
+        message = "✅ $reportType PDF exported to: $path";
+      }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("PDF export failed: $e")),
+        );
+      }
     }
   }
 
-  // --- Widget Builders (No animations in the main content) ---
+  // --- Widget Builders ---
 
   Widget _buildStatCard(
       String label, String value, IconData icon, Color iconColor) {
@@ -369,8 +378,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                         height: 30,
                                         child: OutlinedButton(
                                           onPressed: () => handleApproval(
-                                              activity['id'],
-                                              'Rejected'), // Capitalized to match security rules
+                                              activity['id'], 'Rejected'),
                                           style: OutlinedButton.styleFrom(
                                             foregroundColor: Colors.red,
                                             side: const BorderSide(
@@ -387,8 +395,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                         height: 30,
                                         child: ElevatedButton(
                                           onPressed: () => handleApproval(
-                                              activity['id'],
-                                              'Approved'), // Capitalized to match security rules
+                                              activity['id'], 'Approved'),
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.green,
                                             padding: const EdgeInsets.symmetric(
@@ -421,14 +428,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    // --- MODIFICATION: Removed GestureDetector, using ClipRRect + InkWell for static interaction ---
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: onTap,
-        splashColor: color.withOpacity(0.2), // Subtle splash without animation
-        highlightColor:
-            color.withOpacity(0.1), // Subtle highlight without animation
+        splashColor: color.withOpacity(0.2),
+        highlightColor: color.withOpacity(0.1),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
@@ -444,7 +449,6 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
         ),
       ),
     );
-    // --- END MODIFICATION ---
   }
 
   Widget _buildExportCard(String label, IconData icon, Color color,
@@ -502,7 +506,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       body: SafeArea(
         child: Column(
           children: [
-            // 🔹 Fixed Animated Header (Animation is KEPT here)
+            // Header
             Container(
               height: 70,
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -540,7 +544,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                       icon: const Icon(Icons.logout, color: Colors.white),
                       tooltip: "Logout",
                       onPressed: () {
-                        // NOTE: In a real app, this should involve Firebase sign-out
+                        FirebaseAuth.instance.signOut();
                         Navigator.pushReplacement(
                             context,
                             MaterialPageRoute(
@@ -552,7 +556,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
               ),
             ),
 
-            // 🔹 Scrollable Content (Animations REMOVED)
+            // Main Content
             Expanded(
               child: StreamBuilder<List<Map<String, dynamic>>>(
                   stream: getActivitiesStream(),
@@ -560,7 +564,27 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
                     } else if (snapshot.hasError) {
-                      return Center(child: Text("Error: ${snapshot.error}"));
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.error, color: Colors.red, size: 50),
+                            const SizedBox(height: 16),
+                            Text("Error loading data:",
+                                style: TextStyle(
+                                    fontSize: 16, color: Colors.white)),
+                            Text("${snapshot.error}",
+                                style: TextStyle(
+                                    fontSize: 14, color: Colors.white70),
+                                textAlign: TextAlign.center),
+                            const SizedBox(height: 20),
+                            ElevatedButton(
+                              onPressed: () => setState(() {}),
+                              child: Text("Retry"),
+                            ),
+                          ],
+                        ),
+                      );
                     }
 
                     final activities = snapshot.data ?? [];
@@ -578,8 +602,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const SizedBox(height: 10),
-                          // Static content starts here (no animation wrapper)
-                          Text("Welcome Supervisor $supervisorName!",
+                          Text("Welcome $supervisorName!",
                               style: const TextStyle(
                                   fontSize: 22,
                                   fontWeight: FontWeight.bold,
