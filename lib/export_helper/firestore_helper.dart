@@ -82,7 +82,7 @@ class FirestoreHelper {
     }
   }
 
-  /// 4. Get user profile data
+  /// 4. Get user profile   data
   static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
       final doc = await _firestore
