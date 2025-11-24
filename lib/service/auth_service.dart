@@ -491,7 +491,7 @@ class AuthService {
       // Update user status
       await _firestore.collection('users').doc(userId).update({
         'status': 'approved',
-        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        'updatedAt': FieldValue.serverTimestamp(), // Use server timestamp
         'rejectionReason': FieldValue.delete(),
       });
 
@@ -518,7 +518,7 @@ class AuthService {
       await _firestore.collection('users').doc(userId).update({
         'status': 'declined',
         'rejectionReason': reason,
-        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        'updatedAt': FieldValue.serverTimestamp(), // Use server timestamp
       });
 
       // Update department stats
@@ -722,5 +722,148 @@ class AuthService {
   Future<void> signOut() async {
     await _auth.signOut();
     print('👋 User signed out');
+  }
+}
+
+// NEW: Separate FirebaseService class for admin dashboard with improved performance
+class FirebaseService {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // IMPROVED: Get real-time dashboard stats with better performance
+  Future<Map<String, dynamic>> getDashboardStats() async {
+    try {
+      // Use batched queries for better performance
+      final studentsQuery = _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'Student')
+          .where('status', isEqualTo: 'approved')
+          .count()
+          .get();
+
+      final supervisorsQuery = _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'Supervisor')
+          .where('status', isEqualTo: 'approved')
+          .count()
+          .get();
+
+      final pendingQuery = _firestore
+          .collection('users')
+          .where('status', isEqualTo: 'pending')
+          .count()
+          .get();
+
+      final hoursQuery = _firestore
+          .collection('work_sessions')
+          .where('status', isEqualTo: 'Approved')
+          .get();
+
+      // Execute all queries concurrently
+      final results = await Future.wait([
+        studentsQuery,
+        supervisorsQuery,
+        pendingQuery,
+        hoursQuery,
+      ]);
+
+      // Calculate total approved hours
+      double totalHours = 0;
+      final hoursSnapshot = results[3] as QuerySnapshot;
+      for (var doc in hoursSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        totalHours += (data['hours'] ?? 0).toDouble();
+      }
+
+      return {
+        "totalStudents": (results[0] as AggregateQuerySnapshot).count,
+        "totalSupervisors": (results[1] as AggregateQuerySnapshot).count,
+        "pendingApprovals": (results[2] as AggregateQuerySnapshot).count,
+        "totalHoursApproved": totalHours,
+      };
+    } catch (e) {
+      print('Error loading dashboard stats: $e');
+      return {
+        "totalStudents": 0,
+        "totalSupervisors": 0,
+        "pendingApprovals": 0,
+        "totalHoursApproved": 0,
+      };
+    }
+  }
+
+  // IMPROVED: Real-time users stream with better performance
+  Stream<QuerySnapshot> getUsersStream() {
+    try {
+      return _firestore
+          .collection('users')
+          .orderBy('createdAt', descending: true) // Add ordering for consistency
+          .snapshots();
+    } catch (e) {
+      print('Error getting users stream: $e');
+      // Return empty stream on error
+      return const Stream.empty();
+    }
+  }
+
+  // IMPROVED: Add user with better error handling
+  Future<void> addUser(String email, String role, String name) async {
+    try {
+      await _firestore.collection('users').add({
+        'email': email,
+        'role': role,
+        'name': name,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(), // Add timestamp for ordering
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error adding user: $e');
+      rethrow;
+    }
+  }
+
+  // IMPROVED: Update user status with instant refresh
+  Future<void> updateUserStatus(String userId, String status) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'status': status,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating user status: $e');
+      rethrow;
+    }
+  }
+
+  // IMPROVED: Update user with better performance
+  Future<void> updateUser(
+      String userId, String email, String role, String name) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'email': email,
+        'role': role,
+        'name': name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating user: $e');
+      rethrow;
+    }
+  }
+
+  // IMPROVED: Delete user with error handling
+  Future<void> deleteUser(String userId) async {
+    try {
+      await _firestore.collection('users').doc(userId).delete();
+    } catch (e) {
+      print('Error deleting user: $e');
+      rethrow;
+    }
+  }
+
+  // Sign out
+  Future<void> signOut() async {
+    await _auth.signOut();
   }
 }
