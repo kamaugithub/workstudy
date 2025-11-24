@@ -31,6 +31,7 @@ class _StudentDashboardState extends State<StudentDashboard>
   String selectedActivityTab = 'pending';
 
   String ID = "";
+  String studentEmail = "";
   double totalHoursWorked = 0.0;
   double thisWeekHours = 0.0;
 
@@ -170,6 +171,7 @@ class _StudentDashboardState extends State<StudentDashboard>
       if (mounted) {
         setState(() {
           ID = userData['ID'] ?? "";
+          studentEmail = userData['email'] ?? user.email ?? "";
         });
       }
     } catch (e) {
@@ -219,6 +221,7 @@ class _StudentDashboardState extends State<StudentDashboard>
     return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
   }
 
+  // IMPROVED: Calculate hours with better precision and include student email
   Future<void> handleSubmitHours() async {
     if (comment.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -231,7 +234,7 @@ class _StudentDashboardState extends State<StudentDashboard>
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return; // Make sure user is signed in
+      if (user == null) return;
 
       // Use FirestoreHelper to get user profile
       final userData = await FirestoreHelper.getUserProfile(user.uid);
@@ -245,26 +248,35 @@ class _StudentDashboardState extends State<StudentDashboard>
       }
 
       final studentDepartment = userData['department'];
+      final studentName = userData['name'] ?? "";
 
-      // Calculate hours from duration string (HH:MM:SS)
+      // Get current email (use stored email or Firebase auth email as fallback)
+      final currentStudentEmail =
+          studentEmail.isNotEmpty ? studentEmail : user.email ?? "";
+
+      // IMPROVED: Calculate hours with better precision from duration
       final parts = currentSessionDuration.split(':');
       double hours = 0.0;
       if (parts.length == 3) {
-        hours = int.parse(parts[0]) +
-            int.parse(parts[1]) / 60 +
-            int.parse(parts[2]) / 3600;
+        final totalSeconds = (int.parse(parts[0]) * 3600) + // hours to seconds
+            (int.parse(parts[1]) * 60) + // minutes to seconds
+            int.parse(parts[2]); // seconds
+
+        // Convert to hours with 2 decimal places for better precision
+        hours = double.parse((totalSeconds / 3600).toStringAsFixed(2));
       }
 
-      // Save work session using FirestoreHelper
+      // IMPROVED: Save work session with student email and name
       await FirestoreHelper.addWorkSession({
         'studentId': user.uid,
+        'studentName': studentName, // Added student name
+        'studentEmail': currentStudentEmail, // Added student email
         'department': studentDepartment,
         'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        'hours': hours, // Store as number instead of string
-        'reportDetails':
-            comment.trim(), // Updated field name to match security rules
-        'status': 'Pending', // Capitalized to match security rules
-        'submittedAt': FieldValue.serverTimestamp(), // Updated field name
+        'hours': hours, // Store as precise decimal number
+        'reportDetails': comment.trim(),
+        'status': 'Pending',
+        'submittedAt': FieldValue.serverTimestamp(),
       });
 
       if (mounted) {
@@ -278,8 +290,8 @@ class _StudentDashboardState extends State<StudentDashboard>
       if (timer.isActive) timer.cancel();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Hours submitted for supervisor approval."),
+        SnackBar(
+          content: Text("$hours hours submitted for supervisor approval."),
         ),
       );
     } catch (e) {
@@ -312,8 +324,7 @@ class _StudentDashboardState extends State<StudentDashboard>
           excel.TextCellValue(session["date"] ?? ''),
           excel.TextCellValue(session["hours"]?.toStringAsFixed(2) ?? '0.00'),
           excel.TextCellValue(session["status"] ?? ''),
-          excel.TextCellValue(
-              session["reportDetails"] ?? ''), // Updated field name
+          excel.TextCellValue(session["reportDetails"] ?? ''),
         ]);
       }
 
@@ -374,7 +385,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     e["date"] ?? '',
                     e["hours"]?.toStringAsFixed(2) ?? '0.00',
                     e["status"] ?? '',
-                    e["reportDetails"] ?? '', // Updated field name
+                    e["reportDetails"] ?? '',
                   ];
                 }).toList(),
               ),
@@ -459,6 +470,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                       icon: const Icon(Icons.logout, color: Colors.white),
                       tooltip: "Logout",
                       onPressed: () {
+                        FirebaseAuth.instance.signOut();
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -649,6 +661,14 @@ class _StudentDashboardState extends State<StudentDashboard>
                         color: accentColor,
                       ),
                     ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "(${_calculateCurrentHours()} hours)",
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -678,6 +698,18 @@ class _StudentDashboardState extends State<StudentDashboard>
         ),
       ),
     );
+  }
+
+  // Helper method to calculate current hours for display
+  String _calculateCurrentHours() {
+    final parts = currentSessionDuration.split(':');
+    if (parts.length == 3) {
+      final totalSeconds = (int.parse(parts[0]) * 3600) +
+          (int.parse(parts[1]) * 60) +
+          int.parse(parts[2]);
+      return (totalSeconds / 3600).toStringAsFixed(2);
+    }
+    return "0.00";
   }
 
   Widget _buildCommentCard(Color primaryColor, Color accentColor) {

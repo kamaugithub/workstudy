@@ -96,6 +96,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                 'id': doc.id,
                 'studentId': data['studentId'] ?? '',
                 'student': data['studentName'] ?? 'Unknown Student',
+                'studentEmail':
+                    data['studentEmail'] ?? '', // Added student email
                 'hours': data['hours'] ?? 0.0,
                 'status': data['status']?.toLowerCase() ?? 'pending',
                 'description': data['reportDetails'] ?? '',
@@ -132,6 +134,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       [
         excel.TextCellValue("Date"),
         excel.TextCellValue("Student"),
+        excel.TextCellValue("Email"),
         excel.TextCellValue("Hours"),
         excel.TextCellValue("Status"),
         excel.TextCellValue("Description"),
@@ -142,6 +145,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       data.add([
         excel.TextCellValue(activity["date"] ?? ''),
         excel.TextCellValue(activity["student"] ?? ''),
+        excel.TextCellValue(
+            activity["studentEmail"] ?? ''), // Added email to export
         excel.TextCellValue(activity["hours"]?.toStringAsFixed(2) ?? '0.00'),
         excel.TextCellValue(activity["status"] ?? ''),
         excel.TextCellValue(activity["description"] ?? ''),
@@ -340,6 +345,12 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                 ? Colors.red
                                 : Colors.orange;
 
+                        // Use student email if available, otherwise fall back to student name
+                        final studentDisplay =
+                            activity['studentEmail']?.isNotEmpty == true
+                                ? activity['studentEmail']
+                                : (activity['student'] ?? 'Unknown Student');
+
                         return Container(
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.all(12),
@@ -355,17 +366,33 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                      "${activity['student']} (${activity['hours']?.toStringAsFixed(1)}h)",
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: primaryColor)),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          studentDisplay,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: primaryColor,
+                                              fontSize: 14),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          "${activity['hours']?.toStringAsFixed(2)} hours",
+                                          style: const TextStyle(
+                                              fontSize: 12, color: Colors.grey),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                   Text(activity['date'],
                                       style: const TextStyle(
                                           fontSize: 12, color: Colors.grey)),
                                 ],
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 6),
                               Text(activity['description'],
                                   style: const TextStyle(fontSize: 14)),
                               if (selectedActivityTab == 'pending')
@@ -590,7 +617,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                     final activities = snapshot.data ?? [];
 
                     final totalStudents =
-                        activities.map((a) => a['student']).toSet().length;
+                        activities.map((a) => a['studentId']).toSet().length;
                     final pendingApprovals = activities
                         .where((a) => a["status"] == 'pending')
                         .length;
