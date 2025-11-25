@@ -10,13 +10,16 @@ class FirebaseService {
     return _firestore.collection('users').snapshots();
   }
 
-  // Add a new user - updated for your structure
-  Future<void> addUser(String email, String role, String name) async {
+  // Add a new user - UPDATED with new parameters
+  Future<void> addUser(String email, String role, String name,
+      String department, String idNumber) async {
     await _firestore.collection('users').add({
       'email': email,
       'name': name,
       'role': role,
       'roleLower': role.toLowerCase(),
+      'department': department,
+      'idNumber': idNumber,
       'status': 'pending',
       'isActive': false,
       'createdAt': FieldValue.serverTimestamp(),
@@ -24,14 +27,16 @@ class FirebaseService {
     });
   }
 
-  // Update user role and details - updated for your structure
-  Future<void> updateUser(
-      String userId, String email, String role, String name) async {
+  // Update user role and details - UPDATED with new parameters
+  Future<void> updateUser(String userId, String email, String role, String name,
+      String department, String idNumber) async {
     await _firestore.collection('users').doc(userId).update({
       'email': email,
       'name': name,
       'role': role,
       'roleLower': role.toLowerCase(),
+      'department': department,
+      'idNumber': idNumber,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -126,12 +131,51 @@ class FirebaseService {
         updates['createdAt'] = FieldValue.serverTimestamp();
       }
 
+      // Add missing department field
+      if (data['department'] == null) {
+        updates['department'] = 'Not specified';
+      }
+
+      // Add missing idNumber field
+      if (data['idNumber'] == null) {
+        updates['idNumber'] = 'Not specified';
+      }
+
       // Always update updatedAt
       updates['updatedAt'] = FieldValue.serverTimestamp();
 
       if (updates.isNotEmpty) {
         await _firestore.collection('users').doc(doc.id).update(updates);
       }
+    }
+  }
+
+  // NEW: Create user with Firebase Authentication
+  Future<void> createUserWithEmailAndPassword(String email, String password,
+      String name, String role, String department, String idNumber) async {
+    try {
+      // Create user in Firebase Auth
+      final UserCredential userCredential =
+          await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      // Store user data in Firestore
+      await _firestore.collection('users').doc(userCredential.user!.uid).set({
+        'name': name,
+        'email': email,
+        'role': role,
+        'roleLower': role.toLowerCase(),
+        'department': department,
+        'idNumber': idNumber,
+        'status': 'approved', // Auto-approve admin-created users
+        'isActive': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw Exception('Failed to create user: $e');
     }
   }
 }

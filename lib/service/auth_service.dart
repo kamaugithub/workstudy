@@ -701,7 +701,7 @@ class AuthService {
       final supervisors = users.where((u) => u.role == 'supervisor').toList();
       final pending = users.where((u) => u.status == 'pending').toList();
 
-      print('🏢 DEBUG Department: $department');
+      print(' DEBUG Department: $department');
       print('   - Total Users: ${users.length}');
       print('   - Students: ${students.length}');
       print('   - Supervisors: ${supervisors.length}');

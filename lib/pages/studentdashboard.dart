@@ -8,7 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as excel;
 import 'package:pdf/widgets.dart' as pw;
-
+import 'package:pdf/pdf.dart';
 import 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/export_helper/save_file_web.dart'
     if (dart.library.io) 'package:workstudy/export_helper/save_file_other.dart';

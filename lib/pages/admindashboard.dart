@@ -1,9 +1,18 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-import 'package:workstudy/pages/login.dart';
 import 'dart:async';
-
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:intl/intl.dart';
+import 'package:excel/excel.dart' as excel;
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:workstudy/pages/login.dart';
 import 'package:workstudy/service/firebase_service.dart';
+import 'package:workstudy/export_helper/save_file_other.dart';
+import 'package:workstudy/export_helper/save_file_web.dart'
+    if (dart.library.io) 'package:workstudy/export_helper/save_file_other.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -19,12 +28,20 @@ class _AdminDashboardState extends State<AdminDashboard>
   late Animation<double> _fadeAnimation;
 
   final FirebaseService _firebaseService = FirebaseService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   Map<String, dynamic> stats = {
     "totalStudents": 0,
     "totalSupervisors": 0,
     "pendingApprovals": 0,
     "totalHoursApproved": 0,
+  };
+
+  Map<String, dynamic> reportStats = {
+    "thisMonthHours": 0,
+    "lastMonthHours": 0,
+    "avgHoursPerStudent": 0,
   };
 
   String searchQuery = "";
@@ -45,6 +62,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
     // Load initial data
     _loadDashboardStats();
+    _loadReportStats();
   }
 
   @override
@@ -52,6 +70,45 @@ class _AdminDashboardState extends State<AdminDashboard>
     _animationController.dispose();
     _tabController.dispose();
     super.dispose();
+  }
+
+  // --- TIMESTAMP UTILITY FUNCTIONS ---
+
+  /// Converts any timestamp format to DateTime
+  DateTime? parseAnyTimestamp(dynamic timestamp) {
+    if (timestamp == null) return null;
+
+    try {
+      if (timestamp is Timestamp) {
+        return timestamp.toDate();
+      } else if (timestamp is int) {
+        // Handle milliseconds timestamp
+        return DateTime.fromMillisecondsSinceEpoch(timestamp);
+      } else if (timestamp is String) {
+        return DateTime.tryParse(timestamp);
+      } else if (timestamp is DateTime) {
+        return timestamp;
+      }
+    } catch (e) {
+      print('Error parsing timestamp: $e');
+    }
+    return null;
+  }
+
+  /// Formats timestamp to readable format: "Monday, November 18, 2024 4:35:48 PM"
+  String formatTimestamp(dynamic timestamp) {
+    final dateTime = parseAnyTimestamp(timestamp);
+    if (dateTime == null) return 'Date not available';
+
+    return DateFormat('EEEE, MMMM d, yyyy h:mm:ss a').format(dateTime);
+  }
+
+  /// Formats timestamp for export files
+  String formatTimestampForExport(dynamic timestamp) {
+    final dateTime = parseAnyTimestamp(timestamp);
+    if (dateTime == null) return 'N/A';
+
+    return DateFormat('yyyy-MM-dd HH:mm:ss').format(dateTime);
   }
 
   // Load dashboard statistics
@@ -63,6 +120,69 @@ class _AdminDashboardState extends State<AdminDashboard>
       });
     } catch (e) {
       _showSnack("Error loading dashboard stats: $e");
+    }
+  }
+
+  // Load report statistics
+  Future<void> _loadReportStats() async {
+    try {
+      final now = DateTime.now();
+      final firstDayThisMonth = DateTime(now.year, now.month, 1);
+      final firstDayLastMonth = DateTime(now.year, now.month - 1, 1);
+      final lastDayLastMonth = DateTime(now.year, now.month, 0);
+
+      // Fetch work sessions for this month
+      final thisMonthSessions = await _firestore
+          .collection('work_sessions')
+          .where('date',
+              isGreaterThanOrEqualTo:
+                  DateFormat('yyyy-MM-dd').format(firstDayThisMonth))
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      // Fetch work sessions for last month
+      final lastMonthSessions = await _firestore
+          .collection('work_sessions')
+          .where('date',
+              isGreaterThanOrEqualTo:
+                  DateFormat('yyyy-MM-dd').format(firstDayLastMonth))
+          .where('date',
+              isLessThanOrEqualTo:
+                  DateFormat('yyyy-MM-dd').format(lastDayLastMonth))
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      // Calculate total hours
+      double thisMonthHours = 0;
+      double lastMonthHours = 0;
+
+      for (var session in thisMonthSessions.docs) {
+        final data = session.data();
+        thisMonthHours += (data['hours'] ?? 0.0).toDouble();
+      }
+
+      for (var session in lastMonthSessions.docs) {
+        final data = session.data();
+        lastMonthHours += (data['hours'] ?? 0.0).toDouble();
+      }
+
+      // Calculate average hours per student
+      final students = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'Student')
+          .get();
+      final totalStudents = students.docs.length;
+      final avgHours = totalStudents > 0 ? (thisMonthHours / totalStudents) : 0;
+
+      setState(() {
+        reportStats = {
+          "thisMonthHours": thisMonthHours,
+          "lastMonthHours": lastMonthHours,
+          "avgHoursPerStudent": avgHours,
+        };
+      });
+    } catch (e) {
+      _showSnack("Error loading report stats: $e");
     }
   }
 
@@ -96,15 +216,303 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  void _handleExport(String format) async {
-    _showLoadingEffect(() async {
-      // Simulate export process
-      await Future.delayed(const Duration(seconds: 2));
-      _showSnack(
-        "✅ ${format.toUpperCase()} report generated successfully!",
-        color: Colors.green,
-      );
+  // --- Export Functions ---
+
+  Future<List<Map<String, dynamic>>> _fetchReportData() async {
+    try {
+      // Fetch users data - order by createdAt descending (newest first)
+      final usersSnapshot = await _firestore
+          .collection('users')
+          .orderBy('createdAt', descending: true)
+          .get();
+      final users = usersSnapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'name': data['name'] ?? '',
+          'email': data['email'] ?? '',
+          'role': data['role'] ?? '',
+          'status': data['status'] ?? '',
+          'department': data['department'] ?? '',
+          'createdAt': formatTimestampForExport(data['createdAt']),
+        };
+      }).toList();
+
+      // Fetch work sessions data
+      final sessionsSnapshot = await _firestore
+          .collection('work_sessions')
+          .orderBy('submittedAt', descending: true)
+          .get();
+      final sessions = sessionsSnapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'studentId': data['studentId'] ?? '',
+          'studentName': data['studentName'] ?? '',
+          'studentEmail': data['studentEmail'] ?? '',
+          'hours': data['hours'] ?? 0.0,
+          'status': data['status'] ?? '',
+          'reportDetails': data['reportDetails'] ?? '',
+          'date': data['date'] ?? '',
+          'department': data['department'] ?? '',
+          'submittedAt': formatTimestampForExport(data['submittedAt']),
+        };
+      }).toList();
+
+      return [
+        {'type': 'users', 'data': users},
+        {'type': 'work_sessions', 'data': sessions},
+      ];
+    } catch (e) {
+      throw Exception('Failed to fetch report data: $e');
+    }
+  }
+
+  Future<void> _exportExcel(String format) async {
+    await _showLoadingEffect(() async {
+      try {
+        final reportData = await _fetchReportData();
+        final workbook = excel.Excel.createExcel();
+
+        // Create sheets for different data types
+        for (var section in reportData) {
+          final sheet = workbook[section['type']];
+          final data = section['data'] as List<Map<String, dynamic>>;
+
+          if (data.isEmpty) continue;
+
+          // Create headers from first item's keys
+          final headers = data.first.keys.toList();
+          sheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
+
+          // Add data rows
+          for (var row in data) {
+            final rowData = headers.map((header) {
+              final value = row[header];
+              return excel.TextCellValue(value?.toString() ?? '');
+            }).toList();
+            sheet.appendRow(rowData);
+          }
+        }
+
+        final bytes = workbook.encode();
+        if (bytes == null) {
+          _showSnack("Failed to generate Excel file");
+          return;
+        }
+
+        final fileName =
+            "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx";
+
+        if (kIsWeb) {
+          saveFileWeb(Uint8List.fromList(bytes), fileName);
+          _showSnack(
+            "✅ Excel report download initiated!",
+            color: Colors.green,
+          );
+        } else {
+          final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
+          _showSnack(
+            "✅ Excel report exported to: $path",
+            color: Colors.green,
+          );
+        }
+      } catch (e) {
+        _showSnack("Excel export failed: $e");
+      }
     });
+  }
+
+  Future<void> _exportPDF(String format) async {
+    await _showLoadingEffect(() async {
+      try {
+        final reportData = await _fetchReportData();
+        final pdf = pw.Document();
+
+        for (var section in reportData) {
+          final data = section['data'] as List<Map<String, dynamic>>;
+          if (data.isEmpty) continue;
+
+          final headers = data.first.keys.toList();
+          final tableData = data.map((row) {
+            return headers
+                .map((header) => row[header]?.toString() ?? '')
+                .toList();
+          }).toList();
+
+          pdf.addPage(
+            pw.Page(
+              margin: const pw.EdgeInsets.all(20),
+              build: (context) {
+                return pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    // Header Section
+                    pw.Row(
+                      children: [
+                        pw.Container(
+                          width: 40,
+                          height: 40,
+                          decoration: pw.BoxDecoration(
+                            color: PdfColors.blue500,
+                            shape: pw.BoxShape.circle,
+                          ),
+                          child: pw.Center(
+                            child: pw.Text(
+                              "WS",
+                              style: pw.TextStyle(
+                                color: PdfColors.white,
+                                fontWeight: pw.FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                        pw.SizedBox(width: 10),
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(
+                              "WORKSTUDY",
+                              style: pw.TextStyle(
+                                fontSize: 18,
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColors.blue700,
+                              ),
+                            ),
+                            pw.Text(
+                              "Admin ${section['type']} Report",
+                              style: pw.TextStyle(
+                                fontSize: 12,
+                                color: PdfColors.grey600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+
+                    pw.SizedBox(height: 15),
+
+                    // Report Info
+                    pw.Container(
+                      width: double.infinity,
+                      padding: const pw.EdgeInsets.all(10),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.blue50,
+                        borderRadius: pw.BorderRadius.circular(5),
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "Generated on: ${formatTimestampForExport(DateTime.now())}",
+                            style: pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.grey700,
+                            ),
+                          ),
+                          pw.Text(
+                            "Total Records: ${data.length}",
+                            style: pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.grey700,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    pw.SizedBox(height: 20),
+
+                    // Table
+                    pw.Text(
+                      "${section['type'].replaceAll('_', ' ').toUpperCase()}",
+                      style: pw.TextStyle(
+                        fontSize: 14,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blue800,
+                      ),
+                    ),
+
+                    pw.SizedBox(height: 10),
+
+                    // Data Table
+                    pw.Table.fromTextArray(
+                      border: pw.TableBorder.all(color: PdfColors.grey300),
+                      headerStyle: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.white,
+                        fontSize: 8,
+                      ),
+                      headerDecoration: pw.BoxDecoration(
+                        color: PdfColors.blue700,
+                      ),
+                      cellStyle: pw.TextStyle(
+                        fontSize: 7,
+                        color: PdfColors.grey800,
+                      ),
+                      headers: headers,
+                      data: tableData,
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        }
+
+        final bytes = await pdf.save();
+        final fileName =
+            "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf";
+
+        if (kIsWeb) {
+          saveFileWeb(bytes, fileName);
+          _showSnack(
+            "✅ PDF report download initiated!",
+            color: Colors.green,
+          );
+        } else {
+          final path = await saveFileOther(bytes, fileName);
+          _showSnack(
+            "✅ PDF report exported to: $path",
+            color: Colors.green,
+          );
+        }
+      } catch (e) {
+        _showSnack("PDF export failed: $e");
+      }
+    });
+  }
+
+  // --- User Management Functions ---
+
+  Future<void> _createUserWithEmailAndPassword(String email, String password,
+      String name, String role, String department, String idNumber) async {
+    try {
+      // Create user in Firebase Auth
+      final UserCredential userCredential =
+          await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      // Store user data in Firestore
+      await _firestore.collection('users').doc(userCredential.user!.uid).set({
+        'name': name,
+        'email': email,
+        'role': role,
+        'department': department,
+        'idNumber': idNumber,
+        'status': 'approved', // Auto-approve admin-created users
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      return;
+    } catch (e) {
+      throw Exception('Failed to create user: $e');
+    }
   }
 
   void _confirmDelete(String userId, String email) {
@@ -142,113 +550,196 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  void _addUserDialog(String role) {
-    final emailController = TextEditingController();
-    final nameController = TextEditingController();
+void _addUserDialog(String role) {
+  final emailController = TextEditingController();
+  final nameController = TextEditingController();
+  final idNumberController = TextEditingController();
+  final passwordController = TextEditingController();
+  final departmentController = TextEditingController();
 
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text("Add $role"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: "Full Name",
-                border: OutlineInputBorder(),
-              ),
+  bool _obscureTextAddUser = true;
+
+  showDialog(
+    context: context,
+    builder: (_) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        return AlertDialog(
+          title: Text("Add $role"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: "Full Name",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: emailController,
+                  decoration: const InputDecoration(
+                    labelText: "Email",
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: idNumberController,
+                  decoration: const InputDecoration(
+                    labelText: "ID Number",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: departmentController,
+                  decoration: const InputDecoration(
+                    labelText: "Department",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordController,
+                  obscureText: _obscureTextAddUser,
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    border: const OutlineInputBorder(),
+                    hintText: "Minimum 6 characters",
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureTextAddUser 
+                            ? Icons.visibility_off 
+                            : Icons.visibility,
+                        color: Colors.grey,
+                      ),
+                      onPressed: () {
+                        setDialogState(() {
+                          _obscureTextAddUser = !_obscureTextAddUser;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: emailController,
-              decoration: const InputDecoration(
-                labelText: "Email",
-                border: OutlineInputBorder(),
-              ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final email = emailController.text.trim();
+                final name = nameController.text.trim();
+                final idNumber = idNumberController.text.trim();
+                final department = departmentController.text.trim();
+                final password = passwordController.text.trim();
+
+                if (!_isValidEmail(email) ||
+                    name.isEmpty ||
+                    idNumber.isEmpty ||
+                    department.isEmpty ||
+                    password.length < 6) {
+                  Navigator.pop(context);
+                  _showSnack(
+                      "⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
+                  return;
+                }
+
+                Navigator.pop(context);
+                await _showLoadingEffect(() async {
+                  try {
+                    await _createUserWithEmailAndPassword(
+                        email, password, name, role, department, idNumber);
+                    _showSnack(
+                      "$role added successfully. They can now login with the provided credentials.",
+                      color: Colors.green,
+                    );
+                    _loadDashboardStats();
+                  } catch (e) {
+                    _showSnack("Error adding user: $e");
+                  }
+                });
+              },
+              child: const Text("Add"),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final email = emailController.text.trim();
-              final name = nameController.text.trim();
-
-              if (!_isValidEmail(email) || name.isEmpty) {
-                Navigator.pop(context);
-                _showSnack("⚠️ Please fill all fields correctly.");
-                return;
-              }
-
-              Navigator.pop(context);
-              await _showLoadingEffect(() async {
-                try {
-                  await _firebaseService.addUser(email, role, name);
-                  _showSnack(
-                    "$role added successfully.",
-                    color: Colors.greenAccent,
-                  );
-                  _loadDashboardStats();
-                } catch (e) {
-                  _showSnack("Error adding user: $e");
-                }
-              });
-            },
-            child: const Text("Add"),
-          ),
-        ],
-      ),
-    );
-  }
+        );
+      },
+    ),
+  );
+}
 
   void _editUserDialog(Map<String, dynamic> user, String userId) {
     final emailController = TextEditingController(text: user["email"] ?? '');
     final nameController = TextEditingController(text: user["name"] ?? '');
+    final idNumberController =
+        TextEditingController(text: user["idNumber"] ?? '');
+    final departmentController =
+        TextEditingController(text: user["department"] ?? '');
     String role = user["role"] ?? 'Student';
 
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Edit User"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: "Full Name",
-                border: OutlineInputBorder(),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: "Full Name",
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: emailController,
-              decoration: const InputDecoration(
-                labelText: "Email",
-                border: OutlineInputBorder(),
+              const SizedBox(height: 12),
+              TextField(
+                controller: emailController,
+                decoration: const InputDecoration(
+                  labelText: "Email",
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.emailAddress,
               ),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: role,
-              items: ["Student", "Supervisor"]
-                  .map(
-                    (r) => DropdownMenuItem(value: r, child: Text(r)),
-                  )
-                  .toList(),
-              onChanged: (val) => role = val!,
-              decoration: const InputDecoration(
-                labelText: "Role",
-                border: OutlineInputBorder(),
+              const SizedBox(height: 12),
+              TextField(
+                controller: idNumberController,
+                decoration: const InputDecoration(
+                  labelText: "ID Number",
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: departmentController,
+                decoration: const InputDecoration(
+                  labelText: "Department",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: role,
+                items: ["Student", "Supervisor"]
+                    .map(
+                      (r) => DropdownMenuItem(value: r, child: Text(r)),
+                    )
+                    .toList(),
+                onChanged: (val) => role = val!,
+                decoration: const InputDecoration(
+                  labelText: "Role",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -259,8 +750,13 @@ class _AdminDashboardState extends State<AdminDashboard>
             onPressed: () async {
               final email = emailController.text.trim();
               final name = nameController.text.trim();
+              final idNumber = idNumberController.text.trim();
+              final department = departmentController.text.trim();
 
-              if (!_isValidEmail(email) || name.isEmpty) {
+              if (!_isValidEmail(email) ||
+                  name.isEmpty ||
+                  idNumber.isEmpty ||
+                  department.isEmpty) {
                 Navigator.pop(context);
                 _showSnack("⚠️ Please fill all fields correctly.");
                 return;
@@ -269,11 +765,13 @@ class _AdminDashboardState extends State<AdminDashboard>
               Navigator.pop(context);
               await _showLoadingEffect(() async {
                 try {
-                  await _firebaseService.updateUser(userId, email, role, name);
+                  await _firebaseService.updateUser(
+                      userId, email, role, name, department, idNumber);
                   _showSnack(
                     "✅ User updated successfully.",
                     color: Colors.greenAccent,
                   );
+                  _loadDashboardStats();
                 } catch (e) {
                   _showSnack("Error updating user: $e");
                 }
@@ -574,16 +1072,35 @@ class _AdminDashboardState extends State<AdminDashboard>
                 }
 
                 final users = snapshot.data!.docs;
-                final filteredUsers = users.where((user) {
+                // Sort users by createdAt timestamp (newest first)
+                final sortedUsers = users
+                  ..sort((a, b) {
+                    final aData = a.data() as Map<String, dynamic>;
+                    final bData = b.data() as Map<String, dynamic>;
+                    final aTime = parseAnyTimestamp(aData['createdAt']);
+                    final bTime = parseAnyTimestamp(bData['createdAt']);
+
+                    if (aTime == null && bTime == null) return 0;
+                    if (aTime == null) return 1;
+                    if (bTime == null) return -1;
+
+                    return bTime
+                        .compareTo(aTime); // Descending order (newest first)
+                  });
+
+                final filteredUsers = sortedUsers.where((user) {
                   final userData = user.data() as Map<String, dynamic>;
                   final email =
                       userData['email']?.toString().toLowerCase() ?? '';
                   final role = userData['role']?.toString().toLowerCase() ?? '';
                   final name = userData['name']?.toString().toLowerCase() ?? '';
+                  final idNumber =
+                      userData['idNumber']?.toString().toLowerCase() ?? '';
 
                   return email.contains(searchQuery) ||
                       role.contains(searchQuery) ||
-                      name.contains(searchQuery);
+                      name.contains(searchQuery) ||
+                      idNumber.contains(searchQuery);
                 }).toList();
 
                 if (filteredUsers.isEmpty) {
@@ -605,6 +1122,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                     final role = userData['role'] ?? 'No role';
                     final status = userData['status'] ?? 'pending';
                     final name = userData['name'] ?? 'No name';
+                    final idNumber = userData['idNumber'] ?? 'No ID';
+                    final department =
+                        userData['department'] ?? 'No department';
+                    final createdAt = userData['createdAt'];
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 10),
@@ -623,6 +1144,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                             ),
                             Text(email),
                             const SizedBox(height: 4),
+                            Text('ID: $idNumber • Department: $department'),
+                            const SizedBox(height: 4),
                             Row(
                               children: [
                                 Text('$role • '),
@@ -638,6 +1161,14 @@ class _AdminDashboardState extends State<AdminDashboard>
                                   ),
                                 ),
                               ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Joined: ${formatTimestamp(createdAt)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
                             ),
                             const SizedBox(height: 12),
                             Row(
@@ -801,19 +1332,13 @@ class _AdminDashboardState extends State<AdminDashboard>
             ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
-              onPressed: () => _handleExport("CSV"),
-              icon: const Icon(Icons.download),
-              label: const Text("Export CSV Report"),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton.icon(
-              onPressed: () => _handleExport("PDF"),
+              onPressed: () => _exportPDF("PDF"),
               icon: const Icon(Icons.picture_as_pdf),
               label: const Text("Export PDF Report"),
             ),
             const SizedBox(height: 8),
             ElevatedButton.icon(
-              onPressed: () => _handleExport("Excel"),
+              onPressed: () => _exportExcel("Excel"),
               icon: const Icon(Icons.table_chart),
               label: const Text("Export Excel Report"),
             ),
@@ -840,10 +1365,13 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
             const SizedBox(height: 12),
-            _summaryRow("This Month", "342 hours"),
-            _summaryRow("Last Month", "298 hours"),
+            _summaryRow("This Month",
+                "${reportStats["thisMonthHours"].toStringAsFixed(1)} hours"),
+            _summaryRow("Last Month",
+                "${reportStats["lastMonthHours"].toStringAsFixed(1)} hours"),
             _summaryRow("Total Students", stats["totalStudents"].toString()),
-            _summaryRow("Avg Hours/Student", "7.6 hrs"),
+            _summaryRow("Avg Hours/Student",
+                "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)} hrs"),
           ],
         ),
       ),
