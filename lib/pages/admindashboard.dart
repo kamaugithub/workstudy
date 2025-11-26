@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
@@ -491,9 +492,14 @@ class _AdminDashboardState extends State<AdminDashboard>
   Future<void> _createUserWithEmailAndPassword(String email, String password,
       String name, String role, String department, String idNumber) async {
     try {
-      // Create user in Firebase Auth
+      // Use a different approach - create user through a separate auth instance
+      // This prevents auto-signin
+      final FirebaseAuth tempAuth =
+          FirebaseAuth.instanceFor(app: Firebase.app());
+
+      // Create user without affecting current session
       final UserCredential userCredential =
-          await _auth.createUserWithEmailAndPassword(
+          await tempAuth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -505,10 +511,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         'role': role,
         'department': department,
         'idNumber': idNumber,
-        'status': 'approved', // Auto-approve admin-created users
+        'status': 'approved',
         'createdAt': FieldValue.serverTimestamp(),
       });
 
+      // Sign out from the temp auth instance (doesn't affect main auth)
+      await tempAuth.signOut();
+
+      // Success! Admin stays logged in
       return;
     } catch (e) {
       throw Exception('Failed to create user: $e');
@@ -550,130 +560,130 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-void _addUserDialog(String role) {
-  final emailController = TextEditingController();
-  final nameController = TextEditingController();
-  final idNumberController = TextEditingController();
-  final passwordController = TextEditingController();
-  final departmentController = TextEditingController();
+  void _addUserDialog(String role) {
+    final emailController = TextEditingController();
+    final nameController = TextEditingController();
+    final idNumberController = TextEditingController();
+    final passwordController = TextEditingController();
+    final departmentController = TextEditingController();
 
-  bool _obscureTextAddUser = true;
+    bool _obscureTextAddUser = true;
 
-  showDialog(
-    context: context,
-    builder: (_) => StatefulBuilder(
-      builder: (context, setDialogState) {
-        return AlertDialog(
-          title: Text("Add $role"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: "Full Name",
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: emailController,
-                  decoration: const InputDecoration(
-                    labelText: "Email",
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: TextInputType.emailAddress,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: idNumberController,
-                  decoration: const InputDecoration(
-                    labelText: "ID Number",
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: departmentController,
-                  decoration: const InputDecoration(
-                    labelText: "Department",
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: passwordController,
-                  obscureText: _obscureTextAddUser,
-                  decoration: InputDecoration(
-                    labelText: "Password",
-                    border: const OutlineInputBorder(),
-                    hintText: "Minimum 6 characters",
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureTextAddUser 
-                            ? Icons.visibility_off 
-                            : Icons.visibility,
-                        color: Colors.grey,
-                      ),
-                      onPressed: () {
-                        setDialogState(() {
-                          _obscureTextAddUser = !_obscureTextAddUser;
-                        });
-                      },
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text("Add $role"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: "Full Name",
+                      border: OutlineInputBorder(),
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: emailController,
+                    decoration: const InputDecoration(
+                      labelText: "Email",
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: idNumberController,
+                    decoration: const InputDecoration(
+                      labelText: "ID Number",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: departmentController,
+                    decoration: const InputDecoration(
+                      labelText: "Department",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: _obscureTextAddUser,
+                    decoration: InputDecoration(
+                      labelText: "Password",
+                      border: const OutlineInputBorder(),
+                      hintText: "Minimum 6 characters",
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureTextAddUser
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          color: Colors.grey,
+                        ),
+                        onPressed: () {
+                          setDialogState(() {
+                            _obscureTextAddUser = !_obscureTextAddUser;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final email = emailController.text.trim();
-                final name = nameController.text.trim();
-                final idNumber = idNumberController.text.trim();
-                final department = departmentController.text.trim();
-                final password = passwordController.text.trim();
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final email = emailController.text.trim();
+                  final name = nameController.text.trim();
+                  final idNumber = idNumberController.text.trim();
+                  final department = departmentController.text.trim();
+                  final password = passwordController.text.trim();
 
-                if (!_isValidEmail(email) ||
-                    name.isEmpty ||
-                    idNumber.isEmpty ||
-                    department.isEmpty ||
-                    password.length < 6) {
-                  Navigator.pop(context);
-                  _showSnack(
-                      "⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
-                  return;
-                }
-
-                Navigator.pop(context);
-                await _showLoadingEffect(() async {
-                  try {
-                    await _createUserWithEmailAndPassword(
-                        email, password, name, role, department, idNumber);
+                  if (!_isValidEmail(email) ||
+                      name.isEmpty ||
+                      idNumber.isEmpty ||
+                      department.isEmpty ||
+                      password.length < 6) {
+                    Navigator.pop(context);
                     _showSnack(
-                      "$role added successfully. They can now login with the provided credentials.",
-                      color: Colors.green,
-                    );
-                    _loadDashboardStats();
-                  } catch (e) {
-                    _showSnack("Error adding user: $e");
+                        "⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
+                    return;
                   }
-                });
-              },
-              child: const Text("Add"),
-            ),
-          ],
-        );
-      },
-    ),
-  );
-}
+
+                  Navigator.pop(context);
+                  await _showLoadingEffect(() async {
+                    try {
+                      await _createUserWithEmailAndPassword(
+                          email, password, name, role, department, idNumber);
+                      _showSnack(
+                        "$role added successfully. They can now login with the provided credentials.",
+                        color: Colors.green,
+                      );
+                      _loadDashboardStats();
+                    } catch (e) {
+                      _showSnack("Error adding user: $e");
+                    }
+                  });
+                },
+                child: const Text("Add"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
   void _editUserDialog(Map<String, dynamic> user, String userId) {
     final emailController = TextEditingController(text: user["email"] ?? '');
