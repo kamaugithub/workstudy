@@ -3,8 +3,13 @@ import 'login.dart';
 
 class ResetInstructionsPage extends StatelessWidget {
   final String email;
-
-  const ResetInstructionsPage({super.key, required this.email});
+  final String emailDomain;
+  
+  const ResetInstructionsPage({
+    super.key, 
+    required this.email,
+    this.emailDomain = 'email'
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -25,6 +30,7 @@ class ResetInstructionsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 40),
+
               Card(
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
@@ -42,15 +48,17 @@ class ResetInstructionsPage extends StatelessWidget {
                         color: Color(0xFF032540),
                       ),
                       const SizedBox(height: 24),
-                      const Text(
-                        "Check Your Email",
-                        style: TextStyle(
+                      
+                      Text(
+                        "Check Your ${emailDomain == 'Daystar' ? 'Daystar' : ''} Email",
+                        style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFF032540),
                         ),
                       ),
                       const SizedBox(height: 16),
+
                       const Text(
                         "We've sent a password reset link to:",
                         textAlign: TextAlign.center,
@@ -61,14 +69,13 @@ class ResetInstructionsPage extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 12),
+
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         decoration: BoxDecoration(
                           color: const Color(0xFF032540).withOpacity(0.05),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: const Color(0xFF032540).withOpacity(0.1)),
+                          border: Border.all(color: const Color(0xFF032540).withOpacity(0.1)),
                         ),
                         child: Text(
                           email,
@@ -81,18 +88,24 @@ class ResetInstructionsPage extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      const Text(
-                        "📧 Click the link in the email to reset your password.\n"
-                        "⏰ The link will expire in 1 hour for security.\n"
-                        "🔄 You'll be redirected to set a new password.",
+
+                      Text(
+                        emailDomain == 'Daystar' 
+                          ? "📧 Daystar emails may take longer to arrive. Check your spam folder.\n"
+                            "⏰ The link will expire in 1 hour for security.\n"
+                            "🔄 You'll be redirected to set a new password."
+                          : "📧 Click the link in your Gmail to reset your password.\n"
+                            "⏰ The link will expire in 1 hour for security.\n"
+                            "🔄 You'll be redirected to set a new password.",
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 14,
                           color: Colors.grey,
                           height: 1.5,
                         ),
                       ),
                       const SizedBox(height: 32),
+
                       SizedBox(
                         width: 220,
                         height: 50,
@@ -130,10 +143,11 @@ class ResetInstructionsPage extends StatelessWidget {
                           ),
                         ),
                       ),
+
                       const SizedBox(height: 16),
+
                       TextButton(
                         onPressed: () {
-                          // Optionally resend email
                           Navigator.pop(context);
                         },
                         child: const Text(

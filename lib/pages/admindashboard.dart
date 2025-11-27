@@ -440,6 +440,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     pw.SizedBox(height: 10),
 
                     // Data Table
+                    // ignore: deprecated_member_use
                     pw.Table.fromTextArray(
                       border: pw.TableBorder.all(color: PdfColors.grey300),
                       headerStyle: pw.TextStyle(
@@ -567,7 +568,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     final passwordController = TextEditingController();
     final departmentController = TextEditingController();
 
-    bool _obscureTextAddUser = true;
+    bool obscureTextAddUser = true;
 
     showDialog(
       context: context,
@@ -614,21 +615,21 @@ class _AdminDashboardState extends State<AdminDashboard>
                   const SizedBox(height: 12),
                   TextField(
                     controller: passwordController,
-                    obscureText: _obscureTextAddUser,
+                    obscureText: obscureTextAddUser,
                     decoration: InputDecoration(
                       labelText: "Password",
                       border: const OutlineInputBorder(),
                       hintText: "Minimum 6 characters",
                       suffixIcon: IconButton(
                         icon: Icon(
-                          _obscureTextAddUser
+                          obscureTextAddUser
                               ? Icons.visibility_off
                               : Icons.visibility,
                           color: Colors.grey,
                         ),
                         onPressed: () {
                           setDialogState(() {
-                            _obscureTextAddUser = !_obscureTextAddUser;
+                            obscureTextAddUser = !obscureTextAddUser;
                           });
                         },
                       ),
@@ -702,14 +703,6 @@ class _AdminDashboardState extends State<AdminDashboard>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: "Full Name",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
               TextField(
                 controller: emailController,
                 decoration: const InputDecoration(

@@ -42,11 +42,23 @@ class _SignUpPageState extends State<SignUpPage> {
     "Kitchen",
   ];
 
+  // ✅ Accept both Daystar AND Gmail formats
   bool _isValidEmail(String email) {
     final emailRegex = RegExp(
-      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+      r'^[a-zA-Z0-9._%+-]+@(daystar\.ac\.ke|gmail\.com)$',
+      caseSensitive: false,
     );
-    return emailRegex.hasMatch(email);
+    return emailRegex.hasMatch(email.trim());
+  }
+
+  // ✅ Get email domain for better messaging
+  String _getEmailDomain(String email) {
+    if (email.toLowerCase().contains('@daystar.ac.ke')) {
+      return 'Daystar';
+    } else if (email.toLowerCase().contains('@gmail.com')) {
+      return 'Gmail';
+    }
+    return 'email';
   }
 
   Future<void> handleSignUp() async {
@@ -60,6 +72,7 @@ class _SignUpPageState extends State<SignUpPage> {
       final password = passwordController.text.trim();
       final department = selectedDepartment ?? "Unknown";
       final role = selectedRole ?? 'Unknown';
+      final emailDomain = _getEmailDomain(email);
 
       // Check if ID already exists
       final existing = await _firestore
@@ -73,6 +86,7 @@ class _SignUpPageState extends State<SignUpPage> {
           const SnackBar(
             content: Text("This ID number is already registered."),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
           ),
         );
         return;
@@ -96,10 +110,11 @@ class _SignUpPageState extends State<SignUpPage> {
           barrierDismissible: false,
           builder: (context) => AlertDialog(
             title: const Text('Registration Successful'),
-            content: const Text(
-                'Your account has been created and is pending admin approval. '
-                'You will be able to login once approved. '
-                'Thank you.'),
+            content: Text(
+              'Your $emailDomain account has been created and is pending admin approval. '
+              'You will be able to login once approved. '
+              'Thank you.',
+            ),
             actions: [
               TextButton(
                 onPressed: () {
@@ -137,7 +152,11 @@ class _SignUpPageState extends State<SignUpPage> {
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
     } catch (e) {
@@ -147,6 +166,7 @@ class _SignUpPageState extends State<SignUpPage> {
           SnackBar(
             content: Text("Unexpected error: ${e.toString()}"),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -183,6 +203,7 @@ class _SignUpPageState extends State<SignUpPage> {
     String label, {
     String? hint,
     Widget? suffixIcon,
+    Widget? prefixIcon,
   }) {
     return InputDecoration(
       labelText: label,
@@ -190,6 +211,7 @@ class _SignUpPageState extends State<SignUpPage> {
       hintStyle: const TextStyle(color: Colors.grey),
       labelStyle: const TextStyle(color: Color(0xFF032540)),
       suffixIcon: suffixIcon,
+      prefixIcon: prefixIcon,
       enabledBorder: OutlineInputBorder(
         borderSide: const BorderSide(color: Color(0xFF032540), width: 1.5),
         borderRadius: BorderRadius.circular(12),
@@ -238,10 +260,22 @@ class _SignUpPageState extends State<SignUpPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // WorkStudy Logo/Title
+                    const Text(
+                      "WorkStudy",
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF032540),
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
                     const Text(
                       "Create Account",
                       style: TextStyle(
-                        fontSize: 28,
+                        fontSize: 22,
                         fontWeight: FontWeight.bold,
                         color: Color(0xFF032540),
                       ),
@@ -290,20 +324,24 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Email
+                    // Email Field with Daystar-focused hint
                     TextFormField(
                       controller: emailController,
                       decoration: _inputDecoration(
-                        "Email",
-                        hint: "example@domain.com",
+                        "Email Address",
+                        hint: "e.g. present@daystar.ac.ke or present@gmail.com",
+                        prefixIcon: const Icon(
+                          Icons.email_outlined,
+                          color: Color(0xFF032540),
+                        ),
                       ),
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return "Enter your email";
+                          return "Please enter your email";
                         }
                         if (!_isValidEmail(value.trim())) {
-                          return "Enter a valid email format";
+                          return "Please use @daystar.ac.ke or @gmail.com email";
                         }
                         return null;
                       },
@@ -317,6 +355,10 @@ class _SignUpPageState extends State<SignUpPage> {
                         "ID Number",
                         hint:
                             "Enter assigned ID number (e.g. 21-03008 or 45/456)",
+                        prefixIcon: const Icon(
+                          Icons.badge_outlined,
+                          color: Color(0xFF032540),
+                        ),
                       ),
                       keyboardType: TextInputType.text,
                       validator: (value) {
@@ -339,6 +381,10 @@ class _SignUpPageState extends State<SignUpPage> {
                       decoration: _inputDecoration(
                         "Password",
                         hint: "Use letters, numbers & special chars",
+                        prefixIcon: const Icon(
+                          Icons.lock_outline,
+                          color: Color(0xFF032540),
+                        ),
                         suffixIcon: IconButton(
                           icon: Icon(
                             isPasswordVisible
@@ -390,6 +436,10 @@ class _SignUpPageState extends State<SignUpPage> {
                       decoration: _inputDecoration(
                         "Confirm Password",
                         hint: "Re-enter your password",
+                        prefixIcon: const Icon(
+                          Icons.lock_reset_outlined,
+                          color: Color(0xFF032540),
+                        ),
                         suffixIcon: IconButton(
                           icon: Icon(
                             isConfirmPasswordVisible
@@ -415,6 +465,35 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     const SizedBox(height: 16),
 
+                    // Email Domain Note
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF032540).withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFF032540).withOpacity(0.1),
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 16, color: Colors.grey),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "Use an active email for registration.",
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
                     // Forgot Password
                     Align(
                       alignment: Alignment.centerRight,
@@ -424,7 +503,7 @@ class _SignUpPageState extends State<SignUpPage> {
                           "Forgot Password?",
                           style: TextStyle(
                             color: Color(0xFF032540),
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
@@ -437,7 +516,7 @@ class _SignUpPageState extends State<SignUpPage> {
                             color: Color(0xFF032540),
                           )
                         : SizedBox(
-                            width: 170,
+                            width: 200,
                             height: 50,
                             child: ElevatedButton(
                               onPressed: handleSignUp,
@@ -447,18 +526,26 @@ class _SignUpPageState extends State<SignUpPage> {
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(50),
                                 ),
-                                elevation: 0,
+                                elevation: 3,
+                                shadowColor: Colors.black26,
                               ).copyWith(
                                 overlayColor: MaterialStateProperty.all(
                                   Colors.white.withOpacity(0.2),
                                 ),
                               ),
-                              child: const Text(
-                                "Sign Up",
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.person_add_alt_1, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    "Create Account",
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -481,10 +568,10 @@ class _SignUpPageState extends State<SignUpPage> {
                             );
                           },
                           child: const Text(
-                            "Login",
+                            "Login Here",
                             style: TextStyle(
                               color: Color(0xFF02AEEE),
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
