@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:workstudy/pages/newpasswordpage';
-import 'login.dart'; // Make sure this file exists in your project
-
+import 'package:firebase_auth/firebase_auth.dart';
+import 'login.dart';
+import 'reset_instructions_page.dart';
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
 
@@ -12,72 +12,109 @@ class ForgotPasswordPage extends StatefulWidget {
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _emailController = TextEditingController();
-  bool isLoading = false; // Loading effect flag
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  bool isLoading = false;
 
-  // ✅ Loading effect function
-  Future<void> _showLoadingEffect(VoidCallback action) async {
-    setState(() => isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
-    setState(() => isLoading = false);
-    action();
-  }
-
-  // ✅ Updated email validation (accepts all valid email domains)
-  bool _isValidEmail(String email) {
+  // ✅ Strict Daystar email validation
+  bool _isValidDaystarEmail(String email) {
     final emailRegex = RegExp(
-      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+      r'^[a-zA-Z0-9._%+-]+@daystar\.ac\.ke$',
+      caseSensitive: false,
     );
-    return emailRegex.hasMatch(email);
+    return emailRegex.hasMatch(email.trim());
   }
 
-  void handleResetPassword() {
+  // ✅ Real Firebase password reset
+  Future<void> handleResetPassword() async {
     if (_formKey.currentState!.validate()) {
       final email = _emailController.text.trim();
 
-      if (!_isValidEmail(email)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              "Please enter a valid email address (e.g., example@gmail.com)",
-              style: TextStyle(color: Colors.white),
-            ),
-            backgroundColor: Colors.redAccent,
-            duration: const Duration(seconds: 3),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+      if (!_isValidDaystarEmail(email)) {
+        _showErrorSnackBar(
+            "Please use your Daystar University email (e.g., presentations@daystar.ac.ke)");
         return;
       }
 
-      // 🔹 Show loading effect before proceeding
-      _showLoadingEffect(() {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              "Password reset link sent to your email",
-              style: TextStyle(color: Colors.white),
-            ),
-            backgroundColor: const Color(0xFF032540),
-            duration: const Duration(seconds: 3),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.symmetric(horizontal: 60, vertical: 20),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+      setState(() => isLoading = true);
 
-        // Navigate to NewPasswordPage
+      try {
+        await _auth.sendPasswordResetEmail(email: email);
+
+        // Success - show confirmation
+        _showSuccessSnackBar("Password reset link sent to your Daystar email!");
+
+        // Navigate to instructions page
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => const NewPasswordPage()),
+          MaterialPageRoute(
+            builder: (context) => ResetInstructionsPage(email: email),
+          ),
         );
-      });
+      } on FirebaseAuthException catch (e) {
+        _handleFirebaseError(e);
+      } catch (e) {
+        _showErrorSnackBar("Unexpected error: $e");
+      } finally {
+        setState(() => isLoading = false);
+      }
     }
+  }
+
+  void _handleFirebaseError(FirebaseAuthException e) {
+    String errorMessage;
+    switch (e.code) {
+      case 'user-not-found':
+        errorMessage = "No account found with this Daystar email";
+        break;
+      case 'invalid-email':
+        errorMessage = "Invalid email format";
+        break;
+      case 'too-many-requests':
+        errorMessage = "Too many attempts. Please try again later";
+        break;
+      case 'network-request-failed':
+        errorMessage = "Network error. Check your connection";
+        break;
+      default:
+        errorMessage = "Error: ${e.message ?? 'Unknown error'}";
+    }
+    _showErrorSnackBar(errorMessage);
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white),
+        ),
+        backgroundColor: const Color(0xFF032540),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 60, vertical: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
   }
 
   @override
@@ -134,7 +171,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Text(
-                            "Forgot Password",
+                            "Reset Password",
                             style: TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
@@ -142,16 +179,27 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                               letterSpacing: 1.2,
                             ),
                           ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            "Enter your Daystar University email to receive reset instructions",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
+                            ),
+                          ),
                           const SizedBox(height: 24),
 
-                          // Email Field
+                          // Daystar Email Field
                           TextFormField(
                             controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            autocorrect: false,
                             decoration: InputDecoration(
-                              labelText: "Email",
-                              hintText: "e.g. example@gmail.com",
+                              labelText: "Daystar Email",
+                              hintText: "e.g. presentations@daystar.ac.ke",
                               prefixIcon: const Icon(
-                                Icons.email_outlined,
+                                Icons.school_outlined,
                                 color: Color(0xFF032540),
                               ),
                               enabledBorder: OutlineInputBorder(
@@ -175,21 +223,21 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                             ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return "Please enter your email";
+                                return "Please enter your Daystar email";
                               }
-                              if (!_isValidEmail(value)) {
-                                return "Enter a valid email format";
+                              if (!_isValidDaystarEmail(value)) {
+                                return "Please use @daystar.ac.ke email only";
                               }
                               return null;
                             },
                           ),
 
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 30),
 
-                          // Reset Button with loading effect
+                          // Reset Button
                           SizedBox(
-                            width: 200,
-                            height: 45,
+                            width: 220,
+                            height: 50,
                             child: ElevatedButton(
                               onPressed: isLoading ? null : handleResetPassword,
                               style: ElevatedButton.styleFrom(
@@ -198,29 +246,37 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(50),
                                 ),
-                                elevation: 0,
+                                elevation: 3,
+                                shadowColor: Colors.black26,
                               ),
-                              child:
-                                  isLoading
-                                      ? const SizedBox(
-                                        width: 25,
-                                        height: 25,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 3,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                      : const Text(
-                                        "Reset Password",
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w500,
-                                        ),
+                              child: isLoading
+                                  ? const SizedBox(
+                                      width: 25,
+                                      height: 25,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 3,
+                                        color: Colors.white,
                                       ),
+                                    )
+                                  : const Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.send_outlined, size: 20),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          "Send Reset Link",
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                             ),
                           ),
 
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 20),
 
                           // Back to Login
                           TextButton(
@@ -237,6 +293,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                               style: TextStyle(
                                 color: Color(0xFF032540),
                                 fontWeight: FontWeight.w500,
+                                fontSize: 15,
                               ),
                             ),
                           ),
