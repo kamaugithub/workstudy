@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Add this import
+import 'package:firebase_auth/firebase_auth.dart'; 
 import 'firebase_options.dart';
 import 'package:workstudy/pages/login.dart';
 import 'package:workstudy/pages/admindashboard.dart';
@@ -56,7 +56,7 @@ class AuthWrapper extends StatelessWidget {
     final authService = Provider.of<AuthService>(context);
 
     return StreamBuilder<User?>(
-      // Now User is imported from firebase_auth
+      //  User is imported from firebase_auth
       stream: authService.authStateChanges,
       builder: (context, snapshot) {
         // Show loading while checking auth state
@@ -195,7 +195,7 @@ class LandingPage extends StatelessWidget {
               ),
             ),
 
-            // 🔹 Hero Section
+            //  Hero Section
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -230,7 +230,7 @@ class LandingPage extends StatelessWidget {
               ),
             ),
 
-            // 🔹 CTA Button
+            //  CTA Button
             Padding(
               padding: const EdgeInsets.only(bottom: 40),
               child: ElevatedButton(
@@ -264,7 +264,7 @@ class LandingPage extends StatelessWidget {
               ),
             ),
 
-            // 🔹 Footer
+            //  Footer
             Container(
               padding: const EdgeInsets.all(14),
               color: Colors.black.withOpacity(0.2),

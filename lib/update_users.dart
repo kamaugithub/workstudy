@@ -16,6 +16,8 @@ Future<void> normalizeUsers() async {
       continue;
     }
 
+    
+
     await doc.reference.update({
       'roleLower': role.toLowerCase(),
       'departmentLower': department.toLowerCase(),

@@ -72,7 +72,7 @@ class _SignUpPageState extends State<SignUpPage> {
       final password = passwordController.text.trim();
       final department = selectedDepartment ?? "Unknown";
       final role = selectedRole ?? 'Unknown';
-      final emailDomain = _getEmailDomain(email);
+      
 
       // Check if ID already exists
       final existing = await _firestore
@@ -111,7 +111,7 @@ class _SignUpPageState extends State<SignUpPage> {
           builder: (context) => AlertDialog(
             title: const Text('Registration Successful'),
             content: Text(
-              'Your $emailDomain account has been created and is pending admin approval. '
+              'Your workstudy account has been created and is pending admin approval. '
               'You will be able to login once approved. '
               'Thank you.',
             ),

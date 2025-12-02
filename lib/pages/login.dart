@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:provider/provider.dart'; // ADD THIS
+import 'package:provider/provider.dart';
 
 import 'package:workstudy/pages/admindashboard.dart';
 import 'package:workstudy/pages/supervisordashboard.dart';
 import 'package:workstudy/pages/StudentDashboard.dart';
-import '../service/auth_service.dart'; // ADD THIS
+import '../service/auth_service.dart'; 
 import 'signup.dart';
 import 'forgot_password.dart';
 
@@ -23,7 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   bool showPassword = false;
   bool isLoading = false;
 
-  /// ✅ Handles login logic
+  ///  Handles login logic
   Future<void> handleLogin() async {
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
@@ -41,7 +41,7 @@ class _LoginPageState extends State<LoginPage> {
     try {
       setState(() => isLoading = true);
 
-      // 1️⃣ Sign in with Firebase Authentication
+      //  Sign in with Firebase Authentication
       UserCredential userCredential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
 
@@ -49,7 +49,7 @@ class _LoginPageState extends State<LoginPage> {
       final authService = Provider.of<AuthService>(context, listen: false);
       await authService.checkUserApproval(userCredential.user!.uid);
 
-      // 2️⃣ Try getting user data from Firestore (your existing code)
+      //  Try getting user data from Firestore (your existing code)
       DocumentSnapshot doc =
           await FirebaseFirestore.instance
               .collection('users')
@@ -129,7 +129,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  /// ✅ Redirect user based on role (your existing code remains same)
+  /// Redirect user based on role (your existing code remains same)
   void _navigateToDashboard(String role) {
     Widget targetPage;
 
@@ -147,7 +147,7 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // YOUR EXISTING build METHOD REMAINS EXACTLY THE SAME
+  
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
