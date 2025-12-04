@@ -532,174 +532,17 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
   }
 
   Widget _buildApprovalCard(List<Map<String, dynamic>> activities) {
-    // Fixed: Case-insensitive filtering for all status types
-    final filteredActivities = activities
-        .where((a) =>
-            a["status"]?.toLowerCase() == selectedActivityTab.toLowerCase())
-        .toList();
-
-    return Card(
-      color: Colors.white.withOpacity(0.85),
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.rule, color: accentColor),
-                const SizedBox(width: 8),
-                const Text("Student Activity Approvals",
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-              ],
-            ),
-            const Divider(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildTabButton(
-                  label: 'Pending',
-                  color: Colors.orange,
-                  isSelected: selectedActivityTab.toLowerCase() == 'pending',
-                  onTap: () => setState(() => selectedActivityTab = 'pending'),
-                ),
-                _buildTabButton(
-                  label: 'Approved',
-                  color: Colors.green,
-                  isSelected: selectedActivityTab.toLowerCase() == 'approved',
-                  onTap: () => setState(() => selectedActivityTab = 'approved'),
-                ),
-                _buildTabButton(
-                  label: 'Rejected',
-                  color: Colors.red,
-                  isSelected: selectedActivityTab.toLowerCase() == 'rejected',
-                  onTap: () => setState(() => selectedActivityTab = 'rejected'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 300,
-              child: filteredActivities.isEmpty
-                  ? Center(
-                      child: Text(
-                          "No ${selectedActivityTab.toLowerCase()} activities found.",
-                          style: const TextStyle(color: Colors.grey)))
-                  : ListView.builder(
-                      itemCount: filteredActivities.length,
-                      itemBuilder: (context, index) {
-                        final activity = filteredActivities[index];
-                        final statusColor = activity["status"] == "approved"
-                            ? Colors.green
-                            : activity["status"] == "rejected"
-                                ? Colors.red
-                                : Colors.orange;
-
-                        // Use student email if available, otherwise fall back to student name
-                        final studentDisplay =
-                            activity['studentEmail']?.isNotEmpty == true
-                                ? activity['studentEmail']
-                                : (activity['student'] ?? 'Unknown Student');
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            border:
-                                Border.all(color: statusColor.withOpacity(0.3)),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          studentDisplay,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              color: primaryColor,
-                                              fontSize: 14),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          "${activity['hours']?.toStringAsFixed(2)} hours",
-                                          style: const TextStyle(
-                                              fontSize: 12, color: Colors.grey),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Text(activity['date'],
-                                      style: const TextStyle(
-                                          fontSize: 12, color: Colors.grey)),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(activity['description'],
-                                  style: const TextStyle(fontSize: 14)),
-                              if (selectedActivityTab.toLowerCase() ==
-                                  'pending')
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      SizedBox(
-                                        height: 30,
-                                        child: OutlinedButton(
-                                          onPressed: () => handleApproval(
-                                              activity['id'], 'Rejected'),
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor: Colors.red,
-                                            side: const BorderSide(
-                                                color: Colors.red),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 10),
-                                          ),
-                                          child: const Text('Reject',
-                                              style: TextStyle(fontSize: 12)),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      SizedBox(
-                                        height: 30,
-                                        child: ElevatedButton(
-                                          onPressed: () => handleApproval(
-                                              activity['id'], 'Approved'),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.green,
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 10),
-                                          ),
-                                          child: const Text('Approve',
-                                              style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.white)),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
+    return ApprovalCardContent(
+      selectedActivityTab: selectedActivityTab,
+      activities: activities,
+      onTabChanged: (tab) {
+        setState(() {
+          selectedActivityTab = tab;
+        });
+      },
+      onApprovalChanged: handleApproval,
+      primaryColor: primaryColor,
+      accentColor: accentColor,
     );
   }
 
@@ -931,6 +774,243 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                   }),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class ApprovalCardContent extends StatefulWidget {
+  final String selectedActivityTab;
+  final List<Map<String, dynamic>> activities;
+  final ValueChanged<String> onTabChanged;
+  final Future<void> Function(String, String) onApprovalChanged;
+
+  // Add these as parameters
+  final Color primaryColor;
+  final Color accentColor;
+
+  const ApprovalCardContent({
+    super.key,
+    required this.selectedActivityTab,
+    required this.activities,
+    required this.onTabChanged,
+    required this.onApprovalChanged,
+    required this.primaryColor, // Added
+    required this.accentColor, // Added
+  });
+
+  @override
+  State<ApprovalCardContent> createState() => _ApprovalCardContentState();
+}
+
+class _ApprovalCardContentState extends State<ApprovalCardContent> {
+  @override
+  Widget build(BuildContext context) {
+    // Filter activities based on selected tab
+    final filteredActivities = widget.activities
+        .where((a) =>
+            a["status"]?.toLowerCase() ==
+            widget.selectedActivityTab.toLowerCase())
+        .toList();
+
+    return Card(
+      color: Colors.white.withOpacity(0.85),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.rule,
+                    color: widget.accentColor), // Fixed: use widget.accentColor
+                const SizedBox(width: 8),
+                const Text("Student Activity Approvals",
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const Divider(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildTabButton(
+                  label: 'Pending',
+                  color: Colors.orange,
+                  isSelected:
+                      widget.selectedActivityTab.toLowerCase() == 'pending',
+                  onTap: () => widget.onTabChanged('pending'),
+                ),
+                _buildTabButton(
+                  label: 'Approved',
+                  color: Colors.green,
+                  isSelected:
+                      widget.selectedActivityTab.toLowerCase() == 'approved',
+                  onTap: () => widget.onTabChanged('approved'),
+                ),
+                _buildTabButton(
+                  label: 'Rejected',
+                  color: Colors.red,
+                  isSelected:
+                      widget.selectedActivityTab.toLowerCase() == 'rejected',
+                  onTap: () => widget.onTabChanged('rejected'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 300,
+              child: filteredActivities.isEmpty
+                  ? Center(
+                      child: Text(
+                          "No ${widget.selectedActivityTab.toLowerCase()} activities found.",
+                          style: const TextStyle(color: Colors.grey)))
+                  : ListView.builder(
+                      itemCount: filteredActivities.length,
+                      itemBuilder: (context, index) {
+                        final activity = filteredActivities[index];
+                        final statusColor = activity["status"] == "approved"
+                            ? Colors.green
+                            : activity["status"] == "rejected"
+                                ? Colors.red
+                                : Colors.orange;
+
+                        // Use student email if available, otherwise fall back to student name
+                        final studentDisplay =
+                            activity['studentEmail']?.isNotEmpty == true
+                                ? activity['studentEmail']
+                                : (activity['student'] ?? 'Unknown Student');
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            border:
+                                Border.all(color: statusColor.withOpacity(0.3)),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          studentDisplay,
+                                          style: TextStyle(
+                                              // Fixed: removed const
+                                              fontWeight: FontWeight.bold,
+                                              color: widget
+                                                  .primaryColor, // Fixed: use widget.primaryColor
+                                              fontSize: 14),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          "${activity['hours']?.toStringAsFixed(2)} hours",
+                                          style: const TextStyle(
+                                              fontSize: 12, color: Colors.grey),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Text(activity['date'],
+                                      style: const TextStyle(
+                                          fontSize: 12, color: Colors.grey)),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(activity['description'],
+                                  style: const TextStyle(fontSize: 14)),
+                              if (widget.selectedActivityTab.toLowerCase() ==
+                                  'pending')
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      SizedBox(
+                                        height: 30,
+                                        child: OutlinedButton(
+                                          onPressed: () =>
+                                              widget.onApprovalChanged(
+                                                  activity['id'], 'Rejected'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.red,
+                                            side: const BorderSide(
+                                                color: Colors.red),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10),
+                                          ),
+                                          child: const Text('Reject',
+                                              style: TextStyle(fontSize: 12)),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        height: 30,
+                                        child: ElevatedButton(
+                                          onPressed: () =>
+                                              widget.onApprovalChanged(
+                                                  activity['id'], 'Approved'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.green,
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10),
+                                          ),
+                                          child: const Text('Approve',
+                                              style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.white)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabButton({
+    required String label,
+    required Color color,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        splashColor: color.withOpacity(0.2),
+        highlightColor: color.withOpacity(0.1),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
+            border: isSelected ? Border.all(color: color, width: 1.5) : null,
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? color : Colors.grey.shade600)),
         ),
       ),
     );
