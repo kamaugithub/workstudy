@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart'; 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'package:workstudy/pages/login.dart';
 import 'package:workstudy/pages/admindashboard.dart';
@@ -42,117 +42,21 @@ class WorkStudyApp extends StatelessWidget {
             secondary: const Color(0xFFfacc15),
           ),
         ),
-        home: const AuthWrapper(),
+        // 🔥 CHANGED: Always start at LandingPage
+        home: const LandingPage(),
+        // Optional: Add routes for navigation
+        routes: {
+          '/login': (context) => const LoginPage(),
+          '/landing': (context) => const LandingPage(),
+        },
       ),
     );
   }
 }
 
-class AuthWrapper extends StatelessWidget {
-  const AuthWrapper({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final authService = Provider.of<AuthService>(context);
-
-    return StreamBuilder<User?>(
-      //  User is imported from firebase_auth
-      stream: authService.authStateChanges,
-      builder: (context, snapshot) {
-        // Show loading while checking auth state
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
-          );
-        }
-
-        // If user is logged in, check their approval status
-        if (snapshot.hasData && snapshot.data != null) {
-          return FutureBuilder<AppUser?>(
-            future: authService.getUserById(snapshot.data!.uid),
-            builder: (context, userSnapshot) {
-              if (userSnapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(
-                    child: CircularProgressIndicator(),
-                  ),
-                );
-              }
-
-              if (userSnapshot.hasError) {
-                print('Error fetching user: ${userSnapshot.error}');
-                // If there's an error, go to login
-                return const LandingPage();
-              }
-
-              if (userSnapshot.hasData && userSnapshot.data != null) {
-                final user = userSnapshot.data!;
-
-                // Check if user is approved
-                if (user.isApproved) {
-                  // User is approved, show appropriate dashboard based on role
-                  if (user.isStudent) {
-                    return const StudentDashboard(); // Remove user parameter
-                  } else if (user.isSupervisor) {
-                    return const SupervisorDashboard(); // Remove user parameter
-                  } else if (user.isAdmin) {
-                    return const AdminDashboard(); // Remove user parameter
-                  }
-                } else {
-                  // User is not approved, show pending approval screen
-                  return const PendingApprovalScreen();
-                }
-              }
-
-              // Fallback to landing page
-              return const LandingPage();
-            },
-          );
-        }
-
-        // User is not logged in, show landing page
-        return const LandingPage();
-      },
-    );
-  }
-}
-
-class PendingApprovalScreen extends StatelessWidget {
-  const PendingApprovalScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.hourglass_empty, size: 64, color: Colors.orange[300]),
-            const SizedBox(height: 20),
-            const Text(
-              'Pending Approval',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Your account is waiting for administrator approval.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Provider.of<AuthService>(context, listen: false).signOut();
-              },
-              child: const Text('Sign Out'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// 🔥 CHANGED: Simple - Always show landing page
+// Remove AuthWrapper completely or keep it for other uses
+// But main entry point is now LandingPage
 
 class LandingPage extends StatelessWidget {
   const LandingPage({super.key});
@@ -274,6 +178,110 @@ class LandingPage extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white70, fontSize: 13),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 🔥 Optional: Keep AuthWrapper for manual navigation
+// You can navigate to this from LoginPage after successful login
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authService = Provider.of<AuthService>(context);
+
+    return StreamBuilder<User?>(
+      stream: authService.authStateChanges,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        if (snapshot.hasData && snapshot.data != null) {
+          return FutureBuilder<AppUser?>(
+            future: authService.getUserById(snapshot.data!.uid),
+            builder: (context, userSnapshot) {
+              if (userSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              if (userSnapshot.hasError) {
+                print('Error fetching user: ${userSnapshot.error}');
+                return const LandingPage();
+              }
+
+              if (userSnapshot.hasData && userSnapshot.data != null) {
+                final user = userSnapshot.data!;
+
+                if (user.isApproved) {
+                  if (user.isStudent) {
+                    return const StudentDashboard();
+                  } else if (user.isSupervisor) {
+                    return const SupervisorDashboard();
+                  } else if (user.isAdmin) {
+                    return const AdminDashboard();
+                  }
+                } else {
+                  return const PendingApprovalScreen();
+                }
+              }
+
+              return const LandingPage();
+            },
+          );
+        }
+
+        return const LandingPage();
+      },
+    );
+  }
+}
+
+class PendingApprovalScreen extends StatelessWidget {
+  const PendingApprovalScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.hourglass_empty, size: 64, color: Colors.orange[300]),
+            const SizedBox(height: 20),
+            const Text(
+              'Pending Approval',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Your account is waiting for administrator approval.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Provider.of<AuthService>(context, listen: false).signOut();
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LandingPage()),
+                  (route) => false,
+                );
+              },
+              child: const Text('Back to Home'),
             ),
           ],
         ),
