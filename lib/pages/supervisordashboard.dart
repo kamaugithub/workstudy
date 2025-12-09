@@ -33,6 +33,10 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
   String supervisorName = "";
   String supervisorDepartment = "";
 
+  // New state for student emails drawer
+  bool _showStudentEmails = false;
+  Set<String> _studentEmails = {};
+
   // Firestore instance
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -75,6 +79,28 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     setState(() {
       supervisorName = userData['name'] ?? "";
       supervisorDepartment = userData['department'] ?? "";
+    });
+  }
+
+  // Function to extract unique student emails from activities
+  Set<String> _extractStudentEmails(List<Map<String, dynamic>> activities) {
+    final emails = <String>{};
+    for (var activity in activities) {
+      final email = activity['studentEmail']?.toString().trim();
+      if (email != null && email.isNotEmpty) {
+        emails.add(email);
+      }
+    }
+    return emails;
+  }
+
+  // Toggle student emails drawer
+  void _toggleStudentEmails(List<Map<String, dynamic>> activities) {
+    setState(() {
+      _showStudentEmails = !_showStudentEmails;
+      if (_showStudentEmails) {
+        _studentEmails = _extractStudentEmails(activities);
+      }
     });
   }
 
@@ -498,34 +524,46 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
   // --- Widget Builders ---
 
   Widget _buildStatCard(
-      String label, String value, IconData icon, Color iconColor) {
+      String label, String value, IconData icon, Color iconColor,
+      {VoidCallback? onTap}) {
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: iconColor.withOpacity(0.15),
-              child: Icon(icon, color: iconColor),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: primaryColor),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: iconColor.withOpacity(0.15),
+                child: Icon(icon, color: iconColor),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: primaryColor),
+                  ),
+                  Text(label, style: const TextStyle(color: Colors.grey)),
+                ],
+              ),
+              if (onTap != null) ...[
+                const Spacer(),
+                Icon(
+                  _showStudentEmails ? Icons.expand_less : Icons.expand_more,
+                  color: iconColor.withOpacity(0.7),
                 ),
-                Text(label, style: const TextStyle(color: Colors.grey)),
               ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -623,6 +661,90 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     );
   }
 
+  // Build student emails drawer
+  Widget _buildStudentEmailsDrawer() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      height: _showStudentEmails ? 200 : 0,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: _showStudentEmails
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Student Emails",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: primaryColor,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: () => setState(() {
+                          _showStudentEmails = false;
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 0),
+                Expanded(
+                  child: _studentEmails.isEmpty
+                      ? const Center(
+                          child: Text(
+                            "No student emails found",
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _studentEmails.length,
+                          itemBuilder: (context, index) {
+                            final email = _studentEmails.elementAt(index);
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12.0),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.email_outlined,
+                                      size: 18, color: Colors.grey),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      email,
+                                      style: const TextStyle(fontSize: 14),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            )
+          : const SizedBox.shrink(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -665,7 +787,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                   Align(
                     alignment: Alignment.centerRight,
                     child: IconButton(
-                      icon: const Icon(Icons.logout, color: Colors.white),
+                      icon: const Icon(Icons.logout, color: Color.fromARGB(255, 248, 244, 244)),
                       tooltip: "Logout",
                       onPressed: () {
                         FirebaseAuth.instance.signOut();
@@ -726,31 +848,57 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const SizedBox(height: 10),
-                          Text("Welcome $supervisorName!",
-                              style: const TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                  color: primaryColor)),
+                          // Updated welcome message with department
+                          Text(
+                            "Welcome Supervisor",
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: primaryColor,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            supervisorDepartment.isNotEmpty
+                                ? "$supervisorDepartment Department"
+                                : "Manage student work hour approvals and reports.",
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: Color.fromARGB(255, 233, 231, 231),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                           const SizedBox(height: 4),
                           const Text(
-                              "Manage student work hour approvals and reports.",
-                              style: TextStyle(color: Colors.white70)),
+                            "Manage student work hour approvals and reports.",
+                            style: TextStyle(color: Colors.white70),
+                          ),
                           const SizedBox(height: 20),
+
+                          // Student emails drawer (appears above the cards when open)
+                          _buildStudentEmailsDrawer(),
+                          if (_showStudentEmails) const SizedBox(height: 16),
+
                           Row(
                             children: [
                               Expanded(
-                                  child: _buildStatCard(
-                                      "Total Students",
-                                      totalStudents.toString(),
-                                      Icons.group,
-                                      primaryColor)),
+                                child: _buildStatCard(
+                                  "Total Students",
+                                  totalStudents.toString(),
+                                  Icons.group,
+                                  primaryColor,
+                                  onTap: () => _toggleStudentEmails(activities),
+                                ),
+                              ),
                               const SizedBox(width: 12),
                               Expanded(
-                                  child: _buildStatCard(
-                                      "Pending Approvals",
-                                      pendingApprovals.toString(),
-                                      Icons.pending_actions,
-                                      Colors.orange)),
+                                child: _buildStatCard(
+                                  "Pending Approvals",
+                                  pendingApprovals.toString(),
+                                  Icons.pending_actions,
+                                  Colors.orange,
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 20),
