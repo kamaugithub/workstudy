@@ -36,13 +36,13 @@ class _AdminDashboardState extends State<AdminDashboard>
     "totalStudents": 0,
     "totalSupervisors": 0,
     "pendingApprovals": 0,
-    "totalHoursApproved": 0,
+    "totalHoursApproved": 0.0,
   };
 
   Map<String, dynamic> reportStats = {
-    "thisMonthHours": 0,
-    "lastMonthHours": 0,
-    "avgHoursPerStudent": 0,
+    "thisMonthHours": 0.0,
+    "lastMonthHours": 0.0,
+    "avgHoursPerStudent": 0.0,
   };
 
   String searchQuery = "";
@@ -491,96 +491,134 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // Load dashboard statistics - UPDATED to fetch real data
+  // Load dashboard statistics - FIXED for proper data fetching
   Future<void> _loadDashboardStats() async {
     try {
-      // Fetch real data from Firestore
-      final studentsSnapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'Student')
-          .get();
+      print('Loading dashboard stats...');
+      
+      // Fetch all users to get counts
+      final allUsers = await _firestore.collection('users').get();
+      
+      int totalStudents = 0;
+      int totalSupervisors = 0;
+      
+      for (var doc in allUsers.docs) {
+        final data = doc.data();
+        final role = data['role']?.toString() ?? '';
+        if (role == 'Student') {
+          totalStudents++;
+        } else if (role == 'Supervisor') {
+          totalSupervisors++;
+        }
+      }
 
-      final supervisorsSnapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'Supervisor')
-          .get();
-
+      // Fetch pending sessions
       final pendingSessions = await _firestore
           .collection('work_sessions')
           .where('status', isEqualTo: 'pending')
           .get();
 
+      // Fetch approved sessions for total hours
       final approvedSessions = await _firestore
           .collection('work_sessions')
           .where('status', isEqualTo: 'approved')
           .get();
 
-      // Calculate total hours approved
-      double totalHoursApproved = 0;
+      // Calculate total hours approved with better error handling
+      double totalHoursApproved = 0.0;
       for (var session in approvedSessions.docs) {
         final data = session.data();
         final hours = data['hours'];
         if (hours != null) {
-          totalHoursApproved +=
-              (hours is int ? hours.toDouble() : hours as double? ?? 0.0);
+          if (hours is int) {
+            totalHoursApproved += hours.toDouble();
+          } else if (hours is double) {
+            totalHoursApproved += hours;
+          } else if (hours is String) {
+            totalHoursApproved += double.tryParse(hours) ?? 0.0;
+          }
         }
       }
 
+      print('Calculated stats:');
+      print('- Students: $totalStudents');
+      print('- Supervisors: $totalSupervisors');
+      print('- Pending: ${pendingSessions.docs.length}');
+      print('- Hours: $totalHoursApproved');
+
       setState(() {
         stats = {
-          "totalStudents": studentsSnapshot.docs.length,
-          "totalSupervisors": supervisorsSnapshot.docs.length,
+          "totalStudents": totalStudents,
+          "totalSupervisors": totalSupervisors,
           "pendingApprovals": pendingSessions.docs.length,
           "totalHoursApproved": totalHoursApproved,
         };
       });
 
-      print('Dashboard stats updated: $stats');
+      // Also update email lists when stats load
+      _loadEmailLists();
     } catch (e) {
       print('Error loading dashboard stats: $e');
       _showSnack("Error loading dashboard stats: $e");
     }
   }
 
-  // Load report statistics
+  // Load report statistics - FIXED for better month calculations
   Future<void> _loadReportStats() async {
     try {
       final now = DateTime.now();
-      final firstDayThisMonth = DateTime(now.year, now.month, 1);
-      final firstDayLastMonth = DateTime(now.year, now.month - 1, 1);
-      final lastDayLastMonth = DateTime(now.year, now.month, 0);
+      final currentMonthStart = DateTime(now.year, now.month, 1);
+      final nextMonthStart = DateTime(now.year, now.month + 1, 1);
+      final lastMonthStart = DateTime(now.year, now.month - 1, 1);
+      final lastMonthEnd = DateTime(now.year, now.month, 0);
+
+      print('Loading report stats for current month: ${now.year}-${now.month}');
+      
+      // Format dates for Firestore query (assuming date is stored as string)
+      final currentMonthStartStr = DateFormat('yyyy-MM-dd').format(currentMonthStart);
+      final nextMonthStartStr = DateFormat('yyyy-MM-dd').format(nextMonthStart);
+      final lastMonthStartStr = DateFormat('yyyy-MM-dd').format(lastMonthStart);
+      final lastMonthEndStr = DateFormat('yyyy-MM-dd').format(lastMonthEnd);
+
+      print('Date ranges:');
+      print('- This month: $currentMonthStartStr to $nextMonthStartStr');
+      print('- Last month: $lastMonthStartStr to $lastMonthEndStr');
 
       // Fetch work sessions for this month
       final thisMonthSessions = await _firestore
           .collection('work_sessions')
-          .where('date',
-              isGreaterThanOrEqualTo:
-                  DateFormat('yyyy-MM-dd').format(firstDayThisMonth))
+          .where('date', isGreaterThanOrEqualTo: currentMonthStartStr)
+          .where('date', isLessThan: nextMonthStartStr)
           .where('status', isEqualTo: 'approved')
           .get();
+
+      print('Found ${thisMonthSessions.docs.length} sessions this month');
 
       // Fetch work sessions for last month
       final lastMonthSessions = await _firestore
           .collection('work_sessions')
-          .where('date',
-              isGreaterThanOrEqualTo:
-                  DateFormat('yyyy-MM-dd').format(firstDayLastMonth))
-          .where('date',
-              isLessThanOrEqualTo:
-                  DateFormat('yyyy-MM-dd').format(lastDayLastMonth))
+          .where('date', isGreaterThanOrEqualTo: lastMonthStartStr)
+          .where('date', isLessThanOrEqualTo: lastMonthEndStr)
           .where('status', isEqualTo: 'approved')
           .get();
 
-      // Calculate total hours with null safety
-      double thisMonthHours = 0;
-      double lastMonthHours = 0;
+      print('Found ${lastMonthSessions.docs.length} sessions last month');
+
+      // Calculate total hours
+      double thisMonthHours = 0.0;
+      double lastMonthHours = 0.0;
 
       for (var session in thisMonthSessions.docs) {
         final data = session.data();
         final hours = data['hours'];
         if (hours != null) {
-          thisMonthHours +=
-              (hours is int ? hours.toDouble() : hours as double? ?? 0.0);
+          if (hours is int) {
+            thisMonthHours += hours.toDouble();
+          } else if (hours is double) {
+            thisMonthHours += hours;
+          } else if (hours is String) {
+            thisMonthHours += double.tryParse(hours) ?? 0.0;
+          }
         }
       }
 
@@ -588,18 +626,30 @@ class _AdminDashboardState extends State<AdminDashboard>
         final data = session.data();
         final hours = data['hours'];
         if (hours != null) {
-          lastMonthHours +=
-              (hours is int ? hours.toDouble() : hours as double? ?? 0.0);
+          if (hours is int) {
+            lastMonthHours += hours.toDouble();
+          } else if (hours is double) {
+            lastMonthHours += hours;
+          } else if (hours is String) {
+            lastMonthHours += double.tryParse(hours) ?? 0.0;
+          }
         }
       }
 
-      // Calculate average hours per student
-      final students = await _firestore
+      // Get total active students (with approved status)
+      final activeStudents = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'Student')
+          .where('status', isEqualTo: 'approved')
           .get();
-      final totalStudents = students.docs.length;
-      final avgHours = totalStudents > 0 ? (thisMonthHours / totalStudents) : 0;
+
+      final totalActiveStudents = activeStudents.docs.length;
+      final avgHours = totalActiveStudents > 0 ? (thisMonthHours / totalActiveStudents) : 0.0;
+
+      print('Calculated report stats:');
+      print('- This month hours: $thisMonthHours');
+      print('- Last month hours: $lastMonthHours');
+      print('- Avg hours/student: $avgHours (for $totalActiveStudents active students)');
 
       setState(() {
         reportStats = {
@@ -609,6 +659,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         };
       });
     } catch (e) {
+      print('Error loading report stats: $e');
       _showSnack("Error loading report stats: $e");
     }
   }
@@ -1379,7 +1430,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Overview Tab --- UPDATED for better card arrangement
+  // --- Overview Tab --- UPDATED for better display
   Widget _buildOverviewTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -1407,10 +1458,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  "Manage users, monitor progress, and generate reports.",
-                  style: TextStyle(
-                    fontSize: 14,
+                Text(
+                  "Data last refreshed: ${DateFormat('MMM dd, h:mm a').format(DateTime.now())}",
+                  style: const TextStyle(
+                    fontSize: 12,
                     color: Colors.black54,
                   ),
                 ),
@@ -1421,12 +1472,12 @@ class _AdminDashboardState extends State<AdminDashboard>
                       child: ElevatedButton.icon(
                         onPressed: () {
                           _loadDashboardStats();
-                          _loadEmailLists();
+                          _loadReportStats();
                           _showSnack("Dashboard data refreshed!",
                               color: Colors.green);
                         },
                         icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text("Refresh"),
+                        label: const Text("Refresh Data"),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
                           foregroundColor: Colors.blue,
@@ -1439,11 +1490,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                     Expanded(
                       child: TextButton.icon(
                         onPressed: () {
-                          _showSnack("Tap any card for details",
+                          _showSnack("Tap any card for detailed view",
                               color: Colors.blue);
                         },
                         icon: const Icon(Icons.info_outline, size: 18),
-                        label: const Text("Info"),
+                        label: const Text("View Details"),
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.blue,
                         ),
@@ -1456,34 +1507,33 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
           const SizedBox(height: 20),
 
-          // UPDATED: More compact grid layout
+          // Stats Cards
           GridView.count(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             crossAxisCount: 2,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio:
-                1.1, // Slightly wider cards for better text display
+            childAspectRatio: 1.1,
             children: [
               _statCard(
                 Icons.people,
                 "Students",
-                stats["totalStudents"].toString(),
+                "${stats["totalStudents"]}",
                 Colors.blue,
                 cardType: 'students',
               ),
               _statCard(
                 Icons.supervisor_account,
                 "Supervisors",
-                stats["totalSupervisors"].toString(),
+                "${stats["totalSupervisors"]}",
                 Colors.purple,
                 cardType: 'supervisors',
               ),
               _statCard(
                 Icons.pending_actions,
                 "Pending",
-                stats["pendingApprovals"].toString(),
+                "${stats["pendingApprovals"]}",
                 Colors.orange,
                 cardType: 'pending',
               ),
@@ -1497,7 +1547,7 @@ class _AdminDashboardState extends State<AdminDashboard>
             ],
           ),
 
-          // Quick Stats Summary
+          // Quick Stats Summary - FIXED to show real data
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(16),
@@ -1514,7 +1564,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      "Quick Stats",
+                      "Monthly Hours Summary",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -1541,6 +1591,63 @@ class _AdminDashboardState extends State<AdminDashboard>
                         "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)}h",
                         Colors.green),
                   ],
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: reportStats["thisMonthHours"] > 0 
+                        ? (reportStats["thisMonthHours"] / (reportStats["lastMonthHours"] > 0 ? reportStats["lastMonthHours"] * 2 : 1)).clamp(0.0, 1.0)
+                        : 0.01,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "Progress indicator: This month vs Last month",
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Data Status Indicator
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue.withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _pendingActivities.isNotEmpty ? Icons.warning : Icons.check_circle,
+                  color: _pendingActivities.isNotEmpty ? Colors.orange : Colors.green,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _pendingActivities.isNotEmpty 
+                      ? "${_pendingActivities.length} pending approvals need attention"
+                      : "All clear! No pending approvals",
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ),
               ],
             ),
@@ -1768,7 +1875,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Helper Widgets --- UPDATED for better card design
+  // --- Helper Widgets ---
   Widget _statCard(IconData icon, String title, String value, Color color,
       {required String cardType}) {
     return InkWell(
@@ -1975,7 +2082,11 @@ class _AdminDashboardState extends State<AdminDashboard>
             _summaryRow("Last Month",
                 "${reportStats["lastMonthHours"].toStringAsFixed(1)} hours"),
             _summaryRow("Total Students", stats["totalStudents"].toString()),
-            _summaryRow("Avg Hours/Student",
+            _summaryRow("Pending Approvals",
+                stats["pendingApprovals"].toString()),
+            _summaryRow("Total Hours Approved",
+                "${stats["totalHoursApproved"].toStringAsFixed(1)} hrs"),
+            _summaryRow("Avg Hours/Student (This Month)",
                 "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)} hrs"),
           ],
         ),
