@@ -72,7 +72,6 @@ class _SignUpPageState extends State<SignUpPage> {
       final password = passwordController.text.trim();
       final department = selectedDepartment ?? "Unknown";
       final role = selectedRole ?? 'Unknown';
-      
 
       // Check if ID already exists
       final existing = await _firestore
@@ -213,19 +212,23 @@ class _SignUpPageState extends State<SignUpPage> {
       suffixIcon: suffixIcon,
       prefixIcon: prefixIcon,
       enabledBorder: OutlineInputBorder(
-        borderSide: const BorderSide(color: Color(0xFF032540), width: 1.5),
+        borderSide: const BorderSide(
+            color: Colors.grey, width: 1.0), // Reduced prominence
         borderRadius: BorderRadius.circular(12),
       ),
       focusedBorder: OutlineInputBorder(
-        borderSide: const BorderSide(color: Color(0xFF032540), width: 2.0),
+        borderSide: const BorderSide(
+            color: Color(0xFF032540), width: 1.5), // Reduced from 2.0
         borderRadius: BorderRadius.circular(12),
       ),
       errorBorder: OutlineInputBorder(
-        borderSide: const BorderSide(color: Colors.red, width: 1.5),
+        borderSide:
+            const BorderSide(color: Colors.red, width: 1.0), // Reduced from 1.5
         borderRadius: BorderRadius.circular(12),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderSide: const BorderSide(color: Colors.red, width: 2.0),
+        borderSide:
+            const BorderSide(color: Colors.red, width: 1.5), // Reduced from 2.0
         borderRadius: BorderRadius.circular(12),
       ),
     );
@@ -300,6 +303,8 @@ class _SignUpPageState extends State<SignUpPage> {
                           setState(() => selectedRole = value),
                       validator: (value) =>
                           value == null ? "Please select a role" : null,
+                      icon: const Icon(Icons.arrow_drop_down,
+                          color: Colors.grey), // Reduced prominence
                     ),
                     const SizedBox(height: 16),
 
@@ -321,6 +326,8 @@ class _SignUpPageState extends State<SignUpPage> {
                       validator: (value) => value == null
                           ? "Please select your department"
                           : null,
+                      icon: const Icon(Icons.arrow_drop_down,
+                          color: Colors.grey), // Reduced prominence
                     ),
                     const SizedBox(height: 16),
 
@@ -332,7 +339,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         hint: "e.g. present@daystar.ac.ke or present@gmail.com",
                         prefixIcon: const Icon(
                           Icons.email_outlined,
-                          color: Color(0xFF032540),
+                          color: Colors.grey, // Changed from blue to grey
                         ),
                       ),
                       keyboardType: TextInputType.emailAddress,
@@ -357,7 +364,7 @@ class _SignUpPageState extends State<SignUpPage> {
                             "Enter assigned ID number (e.g. 21-03008 or 45/456)",
                         prefixIcon: const Icon(
                           Icons.badge_outlined,
-                          color: Color(0xFF032540),
+                          color: Colors.grey, // Changed from blue to grey
                         ),
                       ),
                       keyboardType: TextInputType.text,
@@ -367,6 +374,9 @@ class _SignUpPageState extends State<SignUpPage> {
                         }
                         if (!RegExp(r'^[0-9\-/]+$').hasMatch(value)) {
                           return "ID must contain only numbers, dashes (-), or slashes (/)";
+                        }
+                        if (value.length < 5 || value.length > 15) {
+                          return "ID must be between 5 and 15 characters";
                         }
                         return null;
                       },
@@ -383,14 +393,14 @@ class _SignUpPageState extends State<SignUpPage> {
                         hint: "Use letters, numbers & special chars",
                         prefixIcon: const Icon(
                           Icons.lock_outline,
-                          color: Color(0xFF032540),
+                          color: Colors.grey, // Changed from blue to grey
                         ),
                         suffixIcon: IconButton(
                           icon: Icon(
                             isPasswordVisible
                                 ? Icons.visibility
                                 : Icons.visibility_off,
-                            color: const Color(0xFF032540),
+                            color: Colors.grey, // Changed from blue to grey
                           ),
                           onPressed: () => setState(
                             () => isPasswordVisible = !isPasswordVisible,
@@ -438,14 +448,14 @@ class _SignUpPageState extends State<SignUpPage> {
                         hint: "Re-enter your password",
                         prefixIcon: const Icon(
                           Icons.lock_reset_outlined,
-                          color: Color(0xFF032540),
+                          color: Colors.grey, // Changed from blue to grey
                         ),
                         suffixIcon: IconButton(
                           icon: Icon(
                             isConfirmPasswordVisible
                                 ? Icons.visibility
                                 : Icons.visibility_off,
-                            color: const Color(0xFF032540),
+                            color: Colors.grey, // Changed from blue to grey
                           ),
                           onPressed: () => setState(() {
                             isConfirmPasswordVisible =
@@ -469,10 +479,10 @@ class _SignUpPageState extends State<SignUpPage> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF032540).withOpacity(0.05),
+                        color: Colors.grey.withOpacity(0.05), // Lighter grey
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: const Color(0xFF032540).withOpacity(0.1),
+                          color: Colors.grey.withOpacity(0.2), // Softer border
                         ),
                       ),
                       child: const Row(
@@ -502,7 +512,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         child: const Text(
                           "Forgot Password?",
                           style: TextStyle(
-                            color: Color(0xFF032540),
+                            color: Colors.grey, // Changed from blue to grey
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -526,17 +536,19 @@ class _SignUpPageState extends State<SignUpPage> {
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(50),
                                 ),
-                                elevation: 3,
-                                shadowColor: Colors.black26,
+                                elevation: 2, // Reduced from 3
+                                shadowColor: Colors.black12, // Softer shadow
                               ).copyWith(
                                 overlayColor: MaterialStateProperty.all(
-                                  Colors.white.withOpacity(0.2),
+                                  Colors.white
+                                      .withOpacity(0.1), // Reduced opacity
                                 ),
                               ),
                               child: const Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.person_add_alt_1, size: 20),
+                                  Icon(Icons.person_add_alt_1,
+                                      size: 18), // Slightly smaller
                                   SizedBox(width: 8),
                                   Text(
                                     "Create Account",
@@ -557,7 +569,8 @@ class _SignUpPageState extends State<SignUpPage> {
                       children: [
                         const Text(
                           "Already have an account? ",
-                          style: TextStyle(color: Color(0xFF032540)),
+                          style: TextStyle(
+                              color: Colors.grey), // Changed from blue to grey
                         ),
                         TextButton(
                           onPressed: () {
