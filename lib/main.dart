@@ -2,13 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
+
 import 'package:workstudy/pages/login.dart';
 import 'package:workstudy/pages/admindashboard.dart';
 import 'package:workstudy/pages/studentdashboard.dart';
 import 'package:workstudy/pages/supervisordashboard.dart';
+
 import 'package:provider/provider.dart';
 import 'package:workstudy/service/auth_service.dart';
 import 'package:workstudy/models/user_model.dart';
+
+
+import 'package:workstudy/ai/ai_chat_sheet.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,9 +47,39 @@ class WorkStudyApp extends StatelessWidget {
             secondary: const Color(0xFFfacc15),
           ),
         ),
-        // 🔥 CHANGED: Always start at LandingPage
+
+        // ✅ GLOBAL AI BUTTON LIVES HERE
+        builder: (context, child) {
+          return Stack(
+            children: [
+              child!, // entire app
+
+              Positioned(
+                bottom: 20,
+                right: 20,
+                child: FloatingActionButton(
+                  backgroundColor: Colors.blueAccent,
+                  child: const Icon(Icons.school_outlined),
+                  onPressed: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      builder: (_) => const AiChatSheet(),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+
+        // App entry
         home: const LandingPage(),
-        // Optional: Add routes for navigation
+
         routes: {
           '/login': (context) => const LoginPage(),
           '/landing': (context) => const LandingPage(),
@@ -54,10 +89,7 @@ class WorkStudyApp extends StatelessWidget {
   }
 }
 
-// 🔥 CHANGED: Simple - Always show landing page
-// Remove AuthWrapper completely or keep it for other uses
-// But main entry point is now LandingPage
-
+// 🔥 LANDING PAGE (UNCHANGED)
 class LandingPage extends StatelessWidget {
   const LandingPage({super.key});
 
@@ -78,7 +110,6 @@ class LandingPage extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // 🔹 Header
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 40),
               child: Text(
@@ -98,8 +129,6 @@ class LandingPage extends StatelessWidget {
                 ),
               ),
             ),
-
-            //  Hero Section
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -116,7 +145,6 @@ class LandingPage extends StatelessWidget {
                       fontSize: size.width * 0.06,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
-                      letterSpacing: 1.0,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -126,57 +154,35 @@ class LandingPage extends StatelessWidget {
                     style: TextStyle(
                       fontSize: size.width * 0.04,
                       color: Colors.white70,
-                      height: 1.4,
                     ),
                     textAlign: TextAlign.center,
                   ),
                 ],
               ),
             ),
-
-            //  CTA Button
             Padding(
               padding: const EdgeInsets.only(bottom: 40),
               child: ElevatedButton(
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const LoginPage()),
+                    MaterialPageRoute(
+                      builder: (context) => const LoginPage(),
+                    ),
                   );
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF032540),
-                  foregroundColor: const Color.fromARGB(255, 247, 247, 248),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 55,
-                    vertical: 15,
-                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 55, vertical: 15),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(50),
-                  ),
-                  elevation: 10,
-                  shadowColor: Colors.black54,
-                ).copyWith(
-                  overlayColor: MaterialStateProperty.all(
-                    Colors.white.withOpacity(0.2),
                   ),
                 ),
                 child: const Text(
                   "Get Started",
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.normal),
+                  style: TextStyle(fontSize: 22),
                 ),
-              ),
-            ),
-
-            //  Footer
-            Container(
-              padding: const EdgeInsets.all(14),
-              color: Colors.black.withOpacity(0.2),
-              width: double.infinity,
-              child: const Text(
-                "© 2025 WorkStudy | Ramon",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 13),
               ),
             ),
           ],
@@ -186,8 +192,7 @@ class LandingPage extends StatelessWidget {
   }
 }
 
-// 🔥 Optional: Keep AuthWrapper for manual navigation
-// You can navigate to this from LoginPage after successful login
+// 🔥 AUTH WRAPPER (UNCHANGED)
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
@@ -200,9 +205,7 @@ class AuthWrapper extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         }
 
@@ -212,31 +215,19 @@ class AuthWrapper extends StatelessWidget {
             builder: (context, userSnapshot) {
               if (userSnapshot.connectionState == ConnectionState.waiting) {
                 return const Scaffold(
-                  body: Center(
-                    child: CircularProgressIndicator(),
-                  ),
+                  body: Center(child: CircularProgressIndicator()),
                 );
-              }
-
-              if (userSnapshot.hasError) {
-                print('Error fetching user: ${userSnapshot.error}');
-                return const LandingPage();
               }
 
               if (userSnapshot.hasData && userSnapshot.data != null) {
                 final user = userSnapshot.data!;
 
                 if (user.isApproved) {
-                  if (user.isStudent) {
-                    return const StudentDashboard();
-                  } else if (user.isSupervisor) {
-                    return const SupervisorDashboard();
-                  } else if (user.isAdmin) {
-                    return const AdminDashboard();
-                  }
-                } else {
-                  return const PendingApprovalScreen();
+                  if (user.isStudent) return const StudentDashboard();
+                  if (user.isSupervisor) return const SupervisorDashboard();
+                  if (user.isAdmin) return const AdminDashboard();
                 }
+                return const PendingApprovalScreen();
               }
 
               return const LandingPage();
@@ -270,18 +261,6 @@ class PendingApprovalScreen extends StatelessWidget {
             const Text(
               'Your account is waiting for administrator approval.',
               textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Provider.of<AuthService>(context, listen: false).signOut();
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LandingPage()),
-                  (route) => false,
-                );
-              },
-              child: const Text('Back to Home'),
             ),
           ],
         ),
