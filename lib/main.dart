@@ -12,8 +12,10 @@ import 'package:provider/provider.dart';
 import 'package:workstudy/service/auth_service.dart';
 import 'package:workstudy/models/user_model.dart';
 
-
 import 'package:workstudy/ai/ai_chat_sheet.dart';
+
+// 🔥 GLOBAL NAVIGATOR KEY - Add this at the top
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,6 +39,9 @@ class WorkStudyApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
+        // 🔥 ADD THIS LINE - Global navigator key
+        navigatorKey: navigatorKey,
+        
         debugShowCheckedModeBanner: false,
         title: 'Work Study',
         theme: ThemeData(
@@ -48,7 +53,7 @@ class WorkStudyApp extends StatelessWidget {
           ),
         ),
 
-        // ✅ GLOBAL AI BUTTON LIVES HERE
+        // ✅ GLOBAL AI BUTTON LIVES HERE - UPDATED
         builder: (context, child) {
           return Stack(
             children: [
@@ -61,8 +66,9 @@ class WorkStudyApp extends StatelessWidget {
                   backgroundColor: Colors.blueAccent,
                   child: const Icon(Icons.school_outlined),
                   onPressed: () {
+                    // 🔥 USE THE GLOBAL CONTEXT
                     showModalBottomSheet(
-                      context: context,
+                      context: navigatorKey.currentContext!,
                       isScrollControlled: true,
                       shape: const RoundedRectangleBorder(
                         borderRadius:
@@ -77,12 +83,15 @@ class WorkStudyApp extends StatelessWidget {
           );
         },
 
-        // App entry
-        home: const LandingPage(),
+        // App entry - Changed to AuthWrapper to handle routing
+        home: const AuthWrapper(),
 
         routes: {
           '/login': (context) => const LoginPage(),
           '/landing': (context) => const LandingPage(),
+          '/admin': (context) => const AdminDashboard(),
+          '/student': (context) => const StudentDashboard(),
+          '/supervisor': (context) => const SupervisorDashboard(),
         },
       ),
     );
@@ -164,12 +173,7 @@ class LandingPage extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 40),
               child: ElevatedButton(
                 onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const LoginPage(),
-                    ),
-                  );
+                  Navigator.pushNamed(context, '/login');
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF032540),
@@ -192,7 +196,7 @@ class LandingPage extends StatelessWidget {
   }
 }
 
-// 🔥 AUTH WRAPPER (UNCHANGED)
+// 🔥 AUTH WRAPPER (UNCHANGED) - This is now your home
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
