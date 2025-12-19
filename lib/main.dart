@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:workstudy/ai/ai_service.dart';
 import 'firebase_options.dart';
 
 import 'package:workstudy/pages/login.dart';
@@ -22,6 +23,16 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  // 🔥 ADD THIS AI TEST ON STARTUP
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    print(' Starting AI self-test...');
+    final success = await AiService.testConnection();
+    if (success) {
+      print('🎉 AI is WORKING! Ready to assist.');
+    } else {
+      print('⚠️ AI needs configuration. Please check API key.');
+    }
+  });
 
   runApp(const WorkStudyApp());
 }

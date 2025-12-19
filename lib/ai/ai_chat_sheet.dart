@@ -32,6 +32,7 @@ class _AiChatSheetState extends State<AiChatSheet> {
     try {
       final response = await AiService.sendMessage(text);
       // ChatMessages widget will auto-update via stream
+      print('✅ Message sent and saved');
     } catch (e) {
       // Show error to user
       ScaffoldMessenger.of(context).showSnackBar(
@@ -89,13 +90,17 @@ class _AiChatSheetState extends State<AiChatSheet> {
       try {
         await AiService.clearChatHistory();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Chat history cleared')),
+          const SnackBar(
+            content: Text('Chat history cleared'),
+            duration: Duration(seconds: 2),
+          ),
         );
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error clearing history: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -215,6 +220,30 @@ class _AiChatSheetState extends State<AiChatSheet> {
                       ValueKey(_user?.uid ?? 'guest'), // Rebuild on user change
                 ),
               ),
+
+              // Loading indicator
+              if (_isLoading)
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 10),
+                      Text(
+                        'Thinking...',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
               // Input
               ChatInput(

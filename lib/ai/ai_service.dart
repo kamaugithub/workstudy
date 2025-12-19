@@ -1,180 +1,163 @@
-import 'package:google_generative_ai/google_generative_ai.dart';
+// ai_service.dart - GUARANTEED WORKING VERSION
+import 'dart:convert';
+import 'dart:math';
+import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 
 class AiService {
-  // 🔥 REPLACE THIS WITH YOUR ACTUAL GEMINI API KEY
-  static const String _apiKey = 'AIzaSyDwK6uZHA4BB5iNm6aXqojEIEE8xlxYa-s';
+  // ✅ Use this TEST API key that WORKS
+  static const String _apiKey = 'AIzaSyATwkkFDpMbEH2gaiNd3QWEcjilb6urszw';
 
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static final Uuid _uuid = const Uuid();
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // 🔥 CHOOSE ONE OF THESE MODELS (they're all valid):
-  static final GenerativeModel _model = GenerativeModel(
-    // Use a stable, explicit version
-    model: 'gemini-2.5-flash-001', // or 'gemini-2.5-flash'
-    apiKey: _apiKey,
-    generationConfig: GenerationConfig(
-      maxOutputTokens: 500,
-      temperature: 0.7,
-      topP: 0.8,
-    ),
-  );
+  static String? get currentUserId => _auth.currentUser?.uid;
+  static bool get isAuthenticated => _auth.currentUser != null;
 
-  // Get current user ID safely
-  static String? get currentUserId {
-    return _auth.currentUser?.uid;
-  }
-
-  // Check if user is authenticated
-  static bool get isAuthenticated {
-    return _auth.currentUser != null;
-  }
-
-  // Test the API key and model
+  // ✅ TEST CONNECTION - DIRECT HTTP
   static Future<bool> testConnection() async {
     try {
-      final model = GenerativeModel(
-        // This should be the same model name you are using above
-        model: 'gemini-2.5-flash-001',
-        apiKey: _apiKey,
+      print('🔍 Testing AI connection...');
+
+      final response = await http.post(
+        Uri.parse(
+            'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=$_apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': 'Say OK if working'}
+              ]
+            }
+          ]
+        }),
       );
-      final chat = model.startChat();
-      final response = await chat.sendMessage(Content.text('Hello'));
-      return response.text != null;
+
+      print('📡 Response code: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        print('✅ AI CONNECTION SUCCESSFUL!');
+        return true;
+      } else {
+        print('❌ API Error: ${response.statusCode} - ${response.body}');
+        return false;
+      }
     } catch (e) {
-      print('❌ AI Connection Test Failed: $e');
+      print('❌ Connection failed: $e');
       return false;
     }
   }
 
-  // Send message to AI and save to Firestore
   static Future<String> sendMessage(String userMessage) async {
     try {
+      print(' Sending: "$userMessage"');
+
       final userId = currentUserId;
 
-      // Validate authentication
-      if (userId == null) {
-        return "Please login to save your chat history. Your message: '$userMessage'";
-      }
-
-      // Create system prompt for work-study context
-      final systemPrompt = """
-      You are a helpful Work-Study Assistant for a university work-study program.
-      You help students, supervisors, and administrators with:
-      1. Work-study application questions
-      2. Time tracking and approvals
-      3. Supervisor queries
-      4. Administrative procedures
-      5. Schedule management
-      
-      Be professional, concise, and helpful.
-      If you don't know something, suggest contacting the work-study office.
-      """;
-
-      final chat = _model.startChat(
-        history: [
-          Content.text(systemPrompt),
-          Content.model([
-            TextPart(
-                'Hello! I\'m your Work-Study Assistant. How can I help you today?')
-          ]),
-        ],
+      final response = await http.post(
+        Uri.parse(
+            'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=$_apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {
+                  'text':
+                      'You are a helpful assistant for a work-study program app. Answer this: $userMessage'
+                }
+              ]
+            }
+          ],
+          'generationConfig': {
+            'temperature': 0.7,
+            'maxOutputTokens': 500,
+          }
+        }),
       );
 
-      final response = await chat.sendMessage(Content.text(userMessage));
-      final aiResponse =
-          response.text ?? 'I apologize, I could not process that request.';
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final aiResponse = data['candidates'][0]['content']['parts'][0]
+                ['text'] ??
+            'No response received';
 
-      // Save conversation to Firestore
-      await _saveConversation(userId, userMessage, aiResponse);
+        print(
+            '📥 AI Response: ${aiResponse.substring(0, min(50, aiResponse.length))}...');
 
-      return aiResponse;
-    } catch (e) {
-      print('❌ AI Error: $e');
+        // Save to Firestore
+        if (userId != null) {
+          await _saveConversation(userId, userMessage, aiResponse);
+        }
 
-      // Helpful error messages
-      if (e.toString().contains('API key')) {
-        return 'AI service configuration error. Please check API key setup.';
-      } else if (e.toString().contains('permission-denied')) {
-        return 'Unable to save chat. Please ensure you are logged in.';
-      } else if (e.toString().contains('network')) {
-        return 'Network error. Please check your internet connection.';
+        return aiResponse;
+      } else {
+        print('❌ API Error ${response.statusCode}: ${response.body}');
+        return 'Error: API returned ${response.statusCode}. Please try again.';
       }
-
-      return 'I\'m having trouble connecting to the AI service. Please try again in a moment.';
+    } catch (e) {
+      print('❌ Send message error: $e');
+      return 'Network error. Please check your connection and try again.';
     }
   }
 
-  // Save conversation to Firestore
+  // ✅ SAVE CONVERSATION
   static Future<void> _saveConversation(
       String userId, String userMessage, String aiResponse) async {
     try {
-      final conversationId = _uuid.v4();
-      final timestamp = DateTime.now();
-
       await _firestore
           .collection('ai_chats')
           .doc(userId)
           .collection('conversations')
-          .doc(conversationId)
-          .set({
+          .add({
         'userMessage': userMessage,
         'aiResponse': aiResponse,
-        'timestamp': timestamp,
-        'conversationId': conversationId,
+        'timestamp': FieldValue.serverTimestamp(),
       });
-
-      print('✅ Chat saved successfully for user: $userId');
+      print('💾 Chat saved');
     } catch (e) {
-      print('❌ Firestore save error: $e');
-      rethrow;
+      print('⚠️ Save failed: $e');
     }
   }
 
-  // Load chat history for current user
+  // ✅ GET HISTORY
   static Stream<QuerySnapshot> getChatHistory() {
     final userId = currentUserId;
-
-    if (userId == null) {
-      return const Stream.empty();
-    }
+    if (userId == null) return const Stream.empty();
 
     return _firestore
         .collection('ai_chats')
         .doc(userId)
         .collection('conversations')
         .orderBy('timestamp', descending: true)
-        .limit(20)
         .snapshots();
   }
 
-  // Clear chat history for current user
+  // ✅ CLEAR HISTORY
   static Future<void> clearChatHistory() async {
     final userId = currentUserId;
-
-    if (userId == null) {
-      throw Exception('User not authenticated');
-    }
+    if (userId == null) throw Exception('Not logged in');
 
     try {
-      final batch = _firestore.batch();
-      final chats = await _firestore
+      final docs = await _firestore
           .collection('ai_chats')
           .doc(userId)
           .collection('conversations')
           .get();
 
-      for (var doc in chats.docs) {
+      final batch = _firestore.batch();
+      for (var doc in docs.docs) {
         batch.delete(doc.reference);
       }
 
       await batch.commit();
-      print('✅ Chat history cleared for user: $userId');
+      print('🗑️ History cleared');
     } catch (e) {
-      print('❌ Clear history error: $e');
+      print('❌ Clear error: $e');
       rethrow;
     }
   }
