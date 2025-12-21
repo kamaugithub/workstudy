@@ -52,8 +52,6 @@ class AiService {
     }
   }
 
-  
-
   static Future<String> sendMessage(String userMessage) async {
     try {
       print(' Sending: "$userMessage"');
@@ -89,7 +87,7 @@ class AiService {
             'No response received';
 
         print(
-            '📥 AI Response: ${aiResponse.substring(0, min(50, aiResponse.length))}...');
+            '📥 AI Response: ${aiResponse.substring(0, min(50, aiResponse.length as int))}...');
 
         // Save to Firestore
         if (userId != null) {
