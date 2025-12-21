@@ -52,6 +52,8 @@ class AiService {
     }
   }
 
+  
+
   static Future<String> sendMessage(String userMessage) async {
     try {
       print(' Sending: "$userMessage"');
