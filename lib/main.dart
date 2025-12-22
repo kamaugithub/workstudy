@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:workstudy/ai/ai_service.dart';
+
 import 'firebase_options.dart';
 
 import 'package:workstudy/pages/login.dart';
@@ -13,8 +13,6 @@ import 'package:provider/provider.dart';
 import 'package:workstudy/service/auth_service.dart';
 import 'package:workstudy/models/user_model.dart';
 
-import 'package:workstudy/ai/ai_chat_sheet.dart';
-
 // 🔥 GLOBAL NAVIGATOR KEY - Add this at the top
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -23,16 +21,6 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  // 🔥 ADD THIS AI TEST ON STARTUP
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    print(' Starting AI self-test...');
-    final success = await AiService.testConnection();
-    if (success) {
-      print('🎉 AI is WORKING! Ready to assist.');
-    } else {
-      print('⚠️ AI needs configuration. Please check API key.');
-    }
-  });
 
   runApp(const WorkStudyApp());
 }
@@ -52,7 +40,7 @@ class WorkStudyApp extends StatelessWidget {
       child: MaterialApp(
         // 🔥 ADD THIS LINE - Global navigator key
         navigatorKey: navigatorKey,
-        
+
         debugShowCheckedModeBanner: false,
         title: 'Work Study',
         theme: ThemeData(
@@ -63,36 +51,6 @@ class WorkStudyApp extends StatelessWidget {
             secondary: const Color(0xFFfacc15),
           ),
         ),
-
-        // ✅ GLOBAL AI BUTTON LIVES HERE - UPDATED
-        builder: (context, child) {
-          return Stack(
-            children: [
-              child!, // entire app
-
-              Positioned(
-                bottom: 20,
-                right: 20,
-                child: FloatingActionButton(
-                  backgroundColor: Colors.blueAccent,
-                  child: const Icon(Icons.school_outlined),
-                  onPressed: () {
-                    // 🔥 USE THE GLOBAL CONTEXT
-                    showModalBottomSheet(
-                      context: navigatorKey.currentContext!,
-                      isScrollControlled: true,
-                      shape: const RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.vertical(top: Radius.circular(20)),
-                      ),
-                      builder: (_) => const AiChatSheet(),
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
 
         // App entry - Changed to AuthWrapper to handle routing
         home: const AuthWrapper(),
