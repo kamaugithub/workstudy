@@ -47,6 +47,8 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   String searchQuery = "";
   bool isLoading = false;
+  bool _isRefreshing = false;
+  DateTime? _lastRefreshTime;
 
   // New state variables for clickable cards
   String? _expandedCard;
@@ -68,10 +70,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       end: 1.0,
     ).animate(_animationController);
 
-    // Load initial data
-    _loadDashboardStats();
-    _loadReportStats();
-    _loadEmailLists();
+    // Load all data at once
+    _loadAllData();
   }
 
   @override
@@ -79,6 +79,41 @@ class _AdminDashboardState extends State<AdminDashboard>
     _animationController.dispose();
     _tabController.dispose();
     super.dispose();
+  }
+
+  // --- MAIN DATA LOADING METHOD ---
+  Future<void> _loadAllData() async {
+    if (_isRefreshing) return;
+
+    setState(() {
+      isLoading = true;
+      _isRefreshing = true;
+    });
+
+    try {
+      await Future.wait([
+        _loadDashboardStats(),
+        _loadReportStats(),
+        _loadEmailLists(),
+      ]);
+      _lastRefreshTime = DateTime.now();
+      print('All data loaded successfully');
+    } catch (e) {
+      print('Error loading all data: $e');
+      _showSnack("Error loading dashboard data: $e");
+    } finally {
+      setState(() {
+        isLoading = false;
+        _isRefreshing = false;
+      });
+    }
+  }
+
+  // --- REFRESH DATA WITH DEBOUNCING ---
+  Future<void> _refreshData() async {
+    if (_isRefreshing) return;
+    await _loadAllData();
+    _showSnack("Dashboard data refreshed!", color: Colors.green);
   }
 
   // --- TIMESTAMP UTILITY FUNCTIONS ---
@@ -131,11 +166,11 @@ class _AdminDashboardState extends State<AdminDashboard>
 
       _studentsEmails = studentsSnapshot.docs
           .map((doc) {
-            final data = doc.data();
+            final data = doc.data() as Map<String, dynamic>;
             final email = data['email']?.toString().trim() ?? '';
             return email;
           })
-          .where((email) => email.isNotEmpty && email.contains('@'))
+          .where((email) => email.isNotEmpty && _isValidEmail(email))
           .toList();
 
       // Load supervisors emails
@@ -146,11 +181,11 @@ class _AdminDashboardState extends State<AdminDashboard>
 
       _supervisorsEmails = supervisorsSnapshot.docs
           .map((doc) {
-            final data = doc.data();
+            final data = doc.data() as Map<String, dynamic>;
             final email = data['email']?.toString().trim() ?? '';
             return email;
           })
-          .where((email) => email.isNotEmpty && email.contains('@'))
+          .where((email) => email.isNotEmpty && _isValidEmail(email))
           .toList();
 
       // Load pending activities - fetch ALL pending sessions
@@ -160,7 +195,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           .get();
 
       _pendingActivities = pendingSessions.docs.map((doc) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         return {
           'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
           'hours': (data['hours'] ?? 0.0).toDouble(),
@@ -177,7 +212,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           .get();
 
       _approvedActivities = approvedSessions.docs.map((doc) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         return {
           'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
           'hours': (data['hours'] ?? 0.0).toDouble(),
@@ -296,6 +331,12 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _buildCardContent(String cardType, List<dynamic> data, Color color) {
+    if (isLoading) {
+      return Center(
+        child: CircularProgressIndicator(color: color),
+      );
+    }
+
     if (data.isEmpty) {
       return Center(
         child: Column(
@@ -304,7 +345,7 @@ class _AdminDashboardState extends State<AdminDashboard>
             Icon(
               Icons.info_outline,
               size: 60,
-              color: color.withOpacity(0.5),
+              color: color.withOpacity(0.3),
             ),
             const SizedBox(height: 16),
             Text(
@@ -312,6 +353,16 @@ class _AdminDashboardState extends State<AdminDashboard>
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _refreshData,
+              icon: Icon(Icons.refresh, size: 16),
+              label: Text('Refresh'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: color.withOpacity(0.1),
+                foregroundColor: color,
               ),
             ),
           ],
@@ -495,15 +546,15 @@ class _AdminDashboardState extends State<AdminDashboard>
   Future<void> _loadDashboardStats() async {
     try {
       print('Loading dashboard stats...');
-      
+
       // Fetch all users to get counts
       final allUsers = await _firestore.collection('users').get();
-      
+
       int totalStudents = 0;
       int totalSupervisors = 0;
-      
+
       for (var doc in allUsers.docs) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         final role = data['role']?.toString() ?? '';
         if (role == 'Student') {
           totalStudents++;
@@ -527,7 +578,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       // Calculate total hours approved with better error handling
       double totalHoursApproved = 0.0;
       for (var session in approvedSessions.docs) {
-        final data = session.data();
+        final data = session.data() as Map<String, dynamic>;
         final hours = data['hours'];
         if (hours != null) {
           if (hours is int) {
@@ -554,12 +605,9 @@ class _AdminDashboardState extends State<AdminDashboard>
           "totalHoursApproved": totalHoursApproved,
         };
       });
-
-      // Also update email lists when stats load
-      _loadEmailLists();
     } catch (e) {
       print('Error loading dashboard stats: $e');
-      _showSnack("Error loading dashboard stats: $e");
+      throw Exception('Failed to load dashboard stats: $e');
     }
   }
 
@@ -570,25 +618,25 @@ class _AdminDashboardState extends State<AdminDashboard>
       final currentMonthStart = DateTime(now.year, now.month, 1);
       final nextMonthStart = DateTime(now.year, now.month + 1, 1);
       final lastMonthStart = DateTime(now.year, now.month - 1, 1);
-      final lastMonthEnd = DateTime(now.year, now.month, 0);
+      final lastMonthEnd = DateTime(now.year, now.month, 0, 23, 59, 59);
 
       print('Loading report stats for current month: ${now.year}-${now.month}');
-      
-      // Format dates for Firestore query (assuming date is stored as string)
-      final currentMonthStartStr = DateFormat('yyyy-MM-dd').format(currentMonthStart);
-      final nextMonthStartStr = DateFormat('yyyy-MM-dd').format(nextMonthStart);
-      final lastMonthStartStr = DateFormat('yyyy-MM-dd').format(lastMonthStart);
-      final lastMonthEndStr = DateFormat('yyyy-MM-dd').format(lastMonthEnd);
+
+      // Use Timestamps for querying
+      final currentMonthTimestamp = Timestamp.fromDate(currentMonthStart);
+      final nextMonthTimestamp = Timestamp.fromDate(nextMonthStart);
+      final lastMonthTimestamp = Timestamp.fromDate(lastMonthStart);
+      final lastMonthEndTimestamp = Timestamp.fromDate(lastMonthEnd);
 
       print('Date ranges:');
-      print('- This month: $currentMonthStartStr to $nextMonthStartStr');
-      print('- Last month: $lastMonthStartStr to $lastMonthEndStr');
+      print('- This month: $currentMonthStart to $nextMonthStart');
+      print('- Last month: $lastMonthStart to $lastMonthEnd');
 
-      // Fetch work sessions for this month
+      // Fetch work sessions for this month - assuming submittedAt field exists
       final thisMonthSessions = await _firestore
           .collection('work_sessions')
-          .where('date', isGreaterThanOrEqualTo: currentMonthStartStr)
-          .where('date', isLessThan: nextMonthStartStr)
+          .where('submittedAt', isGreaterThanOrEqualTo: currentMonthTimestamp)
+          .where('submittedAt', isLessThan: nextMonthTimestamp)
           .where('status', isEqualTo: 'approved')
           .get();
 
@@ -597,8 +645,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       // Fetch work sessions for last month
       final lastMonthSessions = await _firestore
           .collection('work_sessions')
-          .where('date', isGreaterThanOrEqualTo: lastMonthStartStr)
-          .where('date', isLessThanOrEqualTo: lastMonthEndStr)
+          .where('submittedAt', isGreaterThanOrEqualTo: lastMonthTimestamp)
+          .where('submittedAt', isLessThanOrEqualTo: lastMonthEndTimestamp)
           .where('status', isEqualTo: 'approved')
           .get();
 
@@ -609,7 +657,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       double lastMonthHours = 0.0;
 
       for (var session in thisMonthSessions.docs) {
-        final data = session.data();
+        final data = session.data() as Map<String, dynamic>;
         final hours = data['hours'];
         if (hours != null) {
           if (hours is int) {
@@ -623,7 +671,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       }
 
       for (var session in lastMonthSessions.docs) {
-        final data = session.data();
+        final data = session.data() as Map<String, dynamic>;
         final hours = data['hours'];
         if (hours != null) {
           if (hours is int) {
@@ -644,12 +692,15 @@ class _AdminDashboardState extends State<AdminDashboard>
           .get();
 
       final totalActiveStudents = activeStudents.docs.length;
-      final avgHours = totalActiveStudents > 0 ? (thisMonthHours / totalActiveStudents) : 0.0;
+      final avgHours = totalActiveStudents > 0
+          ? (thisMonthHours / totalActiveStudents)
+          : 0.0;
 
       print('Calculated report stats:');
       print('- This month hours: $thisMonthHours');
       print('- Last month hours: $lastMonthHours');
-      print('- Avg hours/student: $avgHours (for $totalActiveStudents active students)');
+      print(
+          '- Avg hours/student: $avgHours (for $totalActiveStudents active students)');
 
       setState(() {
         reportStats = {
@@ -660,7 +711,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       });
     } catch (e) {
       print('Error loading report stats: $e');
-      _showSnack("Error loading report stats: $e");
+      throw Exception('Failed to load report stats: $e');
     }
   }
 
@@ -705,7 +756,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           .orderBy('createdAt', descending: true)
           .get();
       final users = usersSnapshot.docs.map((doc) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         return {
           'id': doc.id,
           'name': data['name']?.toString() ?? '',
@@ -723,7 +774,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           .orderBy('submittedAt', descending: true)
           .get();
       final sessions = sessionsSnapshot.docs.map((doc) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         return {
           'id': doc.id,
           'studentId': data['studentId']?.toString() ?? '',
@@ -998,6 +1049,14 @@ class _AdminDashboardState extends State<AdminDashboard>
 
       // Success! Admin stays logged in
       return;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        throw Exception('This email is already registered');
+      } else if (e.code == 'weak-password') {
+        throw Exception('Password is too weak');
+      } else {
+        throw Exception('Failed to create user: ${e.message}');
+      }
     } catch (e) {
       throw Exception('Failed to create user: $e');
     }
@@ -1025,8 +1084,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     "$email removed successfully.",
                     color: Colors.green,
                   );
-                  _loadDashboardStats();
-                  _loadEmailLists(); // Refresh email lists
+                  await _loadAllData(); // Refresh all data
                 } catch (e) {
                   _showSnack("Error deleting user: $e");
                 }
@@ -1058,6 +1116,14 @@ class _AdminDashboardState extends State<AdminDashboard>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: "Full Name",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: emailController,
@@ -1142,8 +1208,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                         "$role added successfully. They can now login with the provided credentials.",
                         color: Colors.green,
                       );
-                      _loadDashboardStats();
-                      _loadEmailLists(); // Refresh email lists
+                      await _loadAllData(); // Refresh all data
                     } catch (e) {
                       _showSnack("Error adding user: $e");
                     }
@@ -1254,8 +1319,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     "✅ User updated successfully.",
                     color: Colors.greenAccent,
                   );
-                  _loadDashboardStats();
-                  _loadEmailLists(); // Refresh email lists
+                  await _loadAllData(); // Refresh all data
                 } catch (e) {
                   _showSnack("Error updating user: $e");
                 }
@@ -1277,7 +1341,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(
-            hintText: "Enter email,or role",
+            hintText: "Enter email, name, or role",
             border: OutlineInputBorder(),
           ),
         ),
@@ -1302,8 +1366,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           "$email approved successfully.",
           color: Colors.green,
         );
-        _loadDashboardStats();
-        _loadEmailLists(); // Refresh email lists
+        await _loadAllData(); // Refresh all data
       } catch (e) {
         _showSnack("Error approving user: $e");
       }
@@ -1318,8 +1381,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           "$email declined.",
           color: Colors.red,
         );
-        _loadDashboardStats();
-        _loadEmailLists(); // Refresh email lists
+        await _loadAllData(); // Refresh all data
       } catch (e) {
         _showSnack("Error declining user: $e");
       }
@@ -1432,227 +1494,258 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   // --- Overview Tab --- UPDATED for better display
   Widget _buildOverviewTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.9),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: const [
-                BoxShadow(color: Colors.black12, blurRadius: 4),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "System Overview",
-                  style: TextStyle(
-                    color: Colors.blue,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+    final bool hasStats = stats.isNotEmpty && stats["totalStudents"] != null;
+
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      color: Colors.blue,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black12, blurRadius: 4),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "System Overview",
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "Data last refreshed: ${DateFormat('MMM dd, h:mm a').format(DateTime.now())}",
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.black54,
+                  const SizedBox(height: 4),
+                  Text(
+                    _lastRefreshTime != null
+                        ? "Data last refreshed: ${DateFormat('MMM dd, h:mm a').format(_lastRefreshTime!)}"
+                        : "Loading data...",
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          _loadDashboardStats();
-                          _loadReportStats();
-                          _showSnack("Dashboard data refreshed!",
-                              color: Colors.green);
-                        },
-                        icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text("Refresh Data"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.blue,
-                          elevation: 2,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _refreshData,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text("Refresh Data"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.blue,
+                            elevation: 2,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextButton.icon(
-                        onPressed: () {
-                          _showSnack("Tap any card for detailed view",
-                              color: Colors.blue);
-                        },
-                        icon: const Icon(Icons.info_outline, size: 18),
-                        label: const Text("View Details"),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.blue,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () {
+                            _showSnack("Tap any card for detailed view",
+                                color: Colors.blue);
+                          },
+                          icon: const Icon(Icons.info_outline, size: 18),
+                          label: const Text("View Details"),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.blue,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 20),
+            const SizedBox(height: 20),
 
-          // Stats Cards
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.1,
-            children: [
-              _statCard(
-                Icons.people,
-                "Students",
-                "${stats["totalStudents"]}",
-                Colors.blue,
-                cardType: 'students',
+            // Stats Cards - Show loading skeletons if no data
+            if (!hasStats && isLoading)
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.1,
+                children: List.generate(4, (index) => _loadingStatCard()),
+              )
+            else if (hasStats)
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.1,
+                children: [
+                  _statCard(
+                    Icons.people,
+                    "Students",
+                    "${stats["totalStudents"]}",
+                    Colors.blue,
+                    cardType: 'students',
+                  ),
+                  _statCard(
+                    Icons.supervisor_account,
+                    "Supervisors",
+                    "${stats["totalSupervisors"]}",
+                    Colors.purple,
+                    cardType: 'supervisors',
+                  ),
+                  _statCard(
+                    Icons.pending_actions,
+                    "Pending",
+                    "${stats["pendingApprovals"]}",
+                    Colors.orange,
+                    cardType: 'pending',
+                  ),
+                  _statCard(
+                    Icons.timer,
+                    "Hours",
+                    "${stats["totalHoursApproved"].toStringAsFixed(1)}h",
+                    Colors.green,
+                    cardType: 'hours',
+                  ),
+                ],
               ),
-              _statCard(
-                Icons.supervisor_account,
-                "Supervisors",
-                "${stats["totalSupervisors"]}",
-                Colors.purple,
-                cardType: 'supervisors',
-              ),
-              _statCard(
-                Icons.pending_actions,
-                "Pending",
-                "${stats["pendingApprovals"]}",
-                Colors.orange,
-                cardType: 'pending',
-              ),
-              _statCard(
-                Icons.timer,
-                "Hours",
-                "${stats["totalHoursApproved"].toStringAsFixed(1)}h",
-                Colors.green,
-                cardType: 'hours',
-              ),
-            ],
-          ),
+            const SizedBox(height: 20),
 
-          // Quick Stats Summary - FIXED to show real data
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: const [
-                BoxShadow(color: Colors.black12, blurRadius: 3),
-              ],
-            ),
-            child: Column(
-              children: [
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      "Monthly Hours Summary",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.blue,
+            // Quick Stats Summary
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black12, blurRadius: 3),
+                ],
+              ),
+              child: Column(
+                children: [
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Monthly Hours Summary",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.blue,
+                        ),
                       ),
+                      Icon(Icons.trending_up, color: Colors.blue, size: 20),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _miniStat(
+                          "This Month",
+                          "${reportStats["thisMonthHours"].toStringAsFixed(1)}h",
+                          Colors.blue),
+                      _miniStat(
+                          "Last Month",
+                          "${reportStats["lastMonthHours"].toStringAsFixed(1)}h",
+                          Colors.grey),
+                      _miniStat(
+                          "Avg/Student",
+                          "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)}h",
+                          Colors.green),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    Icon(Icons.trending_up, color: Colors.blue, size: 20),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _miniStat(
-                        "This Month",
-                        "${reportStats["thisMonthHours"].toStringAsFixed(1)}h",
-                        Colors.blue),
-                    _miniStat(
-                        "Last Month",
-                        "${reportStats["lastMonthHours"].toStringAsFixed(1)}h",
-                        Colors.grey),
-                    _miniStat(
-                        "Avg/Student",
-                        "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)}h",
-                        Colors.green),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                  child: FractionallySizedBox(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: reportStats["thisMonthHours"] > 0 
-                        ? (reportStats["thisMonthHours"] / (reportStats["lastMonthHours"] > 0 ? reportStats["lastMonthHours"] * 2 : 1)).clamp(0.0, 1.0)
-                        : 0.01,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.blue,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        double progress = 0.0;
+                        if (reportStats["lastMonthHours"] > 0) {
+                          progress = (reportStats["thisMonthHours"] /
+                                  reportStats["lastMonthHours"])
+                              .clamp(0.0, 1.0);
+                        } else if (reportStats["thisMonthHours"] > 0) {
+                          progress = 1.0;
+                        }
+
+                        return Stack(
+                          children: [
+                            Container(
+                              width: constraints.maxWidth * progress,
+                              decoration: BoxDecoration(
+                                color: Colors.blue,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "Progress indicator: This month vs Last month",
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey[600],
+                  const SizedBox(height: 4),
+                  Text(
+                    "Progress indicator: This month vs Last month",
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey[600],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          
-          // Data Status Indicator
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue.withOpacity(0.2)),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  _pendingActivities.isNotEmpty ? Icons.warning : Icons.check_circle,
-                  color: _pendingActivities.isNotEmpty ? Colors.orange : Colors.green,
-                  size: 16,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _pendingActivities.isNotEmpty 
-                      ? "${_pendingActivities.length} pending approvals need attention"
-                      : "All clear! No pending approvals",
-                    style: const TextStyle(fontSize: 12),
+
+            // Data Status Indicator
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _pendingActivities.isNotEmpty
+                        ? Icons.warning
+                        : Icons.check_circle,
+                    color: _pendingActivities.isNotEmpty
+                        ? Colors.orange
+                        : Colors.green,
+                    size: 16,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _pendingActivities.isNotEmpty
+                          ? "${_pendingActivities.length} pending approvals need attention"
+                          : "All clear! No pending approvals",
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1876,6 +1969,69 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   // --- Helper Widgets ---
+  Widget _loadingStatCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Loading icon
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.grey.withOpacity(0.3),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Loading value
+            Container(
+              width: 40,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 4),
+            // Loading title
+            Container(
+              width: 60,
+              height: 14,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _statCard(IconData icon, String title, String value, Color color,
       {required String cardType}) {
     return InkWell(
@@ -2082,8 +2238,8 @@ class _AdminDashboardState extends State<AdminDashboard>
             _summaryRow("Last Month",
                 "${reportStats["lastMonthHours"].toStringAsFixed(1)} hours"),
             _summaryRow("Total Students", stats["totalStudents"].toString()),
-            _summaryRow("Pending Approvals",
-                stats["pendingApprovals"].toString()),
+            _summaryRow(
+                "Pending Approvals", stats["pendingApprovals"].toString()),
             _summaryRow("Total Hours Approved",
                 "${stats["totalHoursApproved"].toStringAsFixed(1)} hrs"),
             _summaryRow("Avg Hours/Student (This Month)",
