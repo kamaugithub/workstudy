@@ -1225,109 +1225,137 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   void _editUserDialog(Map<String, dynamic> user, String userId) {
     final emailController = TextEditingController(text: user["email"] ?? '');
-    final nameController = TextEditingController(text: user["name"] ?? '');
     final idNumberController =
         TextEditingController(text: user["idNumber"] ?? '');
     final departmentController =
         TextEditingController(text: user["department"] ?? '');
-    String role = user["role"] ?? 'Student';
+
+    // Get the role and ensure it's valid
+    String role = user["role"]?.toString() ?? 'Student';
+
+    // Define valid roles
+    final List<String> validRoles = ["Student", "Supervisor"];
+
+    // If the current role isn't valid, default to 'Student'
+    if (!validRoles.contains(role)) {
+      role = 'Student';
+    }
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Edit User"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: "Name",
-                  border: OutlineInputBorder(),
-                ),
+      builder: (_) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text("Edit User"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: emailController,
+                    decoration: const InputDecoration(
+                      labelText: "Email",
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: idNumberController,
+                    decoration: const InputDecoration(
+                      labelText: "ID Number",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: departmentController,
+                    decoration: const InputDecoration(
+                      labelText: "Department",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: role,
+                    items: validRoles.map((String role) {
+                      return DropdownMenuItem<String>(
+                        value: role,
+                        child: Text(role),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          role = newValue;
+                        });
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      labelText: "Role",
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please select a role';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: emailController,
-                decoration: const InputDecoration(
-                  labelText: "Email",
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.emailAddress,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: idNumberController,
-                decoration: const InputDecoration(
-                  labelText: "ID Number",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: departmentController,
-                decoration: const InputDecoration(
-                  labelText: "Department",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: role,
-                items: ["Student", "Supervisor"]
-                    .map(
-                      (r) => DropdownMenuItem(value: r, child: Text(r)),
-                    )
-                    .toList(),
-                onChanged: (val) => role = val!,
-                decoration: const InputDecoration(
-                  labelText: "Role",
-                  border: OutlineInputBorder(),
-                ),
+              ElevatedButton(
+                onPressed: () async {
+                  final email = emailController.text.trim();
+                  final idNumber = idNumberController.text.trim();
+                  final department = departmentController.text.trim();
+
+                  if (!_isValidEmail(email) ||
+                      idNumber.isEmpty ||
+                      department.isEmpty) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please fill all fields correctly.");
+                    return;
+                  }
+
+                  // Ensure role is valid
+                  if (!validRoles.contains(role)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please select a valid role.");
+                    return;
+                  }
+
+                  Navigator.pop(context);
+                  await _showLoadingEffect(() async {
+                    try {
+                      await _firebaseService.updateUser(
+                          userId,
+                          user["name"] ?? '',
+                          email,
+                          role,
+                          department,
+                          idNumber);
+                      _showSnack(
+                        "✅ User updated successfully.",
+                        color: Colors.green,
+                      );
+                      await _loadAllData(); // Refresh all data
+                    } catch (e) {
+                      _showSnack("Error updating user: $e");
+                    }
+                  });
+                },
+                child: const Text("Save"),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final email = emailController.text.trim();
-              final name = nameController.text.trim();
-              final idNumber = idNumberController.text.trim();
-              final department = departmentController.text.trim();
-
-              if (!_isValidEmail(email) ||
-                  name.isEmpty ||
-                  idNumber.isEmpty ||
-                  department.isEmpty) {
-                Navigator.pop(context);
-                _showSnack("⚠️ Please fill all fields correctly.");
-                return;
-              }
-
-              Navigator.pop(context);
-              await _showLoadingEffect(() async {
-                try {
-                  await _firebaseService.updateUser(
-                      userId, email, role, name, department, idNumber);
-                  _showSnack(
-                    "✅ User updated successfully.",
-                    color: Colors.greenAccent,
-                  );
-                  await _loadAllData(); // Refresh all data
-                } catch (e) {
-                  _showSnack("Error updating user: $e");
-                }
-              });
-            },
-            child: const Text("Save"),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
