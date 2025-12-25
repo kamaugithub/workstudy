@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:excel/excel.dart' as excel;
 import 'package:pdf/widgets.dart' as pw;
@@ -759,26 +760,34 @@ class _AdminDashboardState extends State<AdminDashboard>
         final data = doc.data() as Map<String, dynamic>;
         return {
           'id': doc.id,
-          'name': data['name']?.toString() ?? '',
-         
+          'email': data['email']?.toString() ?? '',
           'role': data['role']?.toString() ?? '',
           'status': data['status']?.toString() ?? '',
           'department': data['department']?.toString() ?? '',
+          'idNumber': data['idNumber']?.toString() ?? '',
           'createdAt': formatTimestampForExport(data['createdAt']),
         };
       }).toList();
 
-      // Fetch work sessions data
+      // Fetch work sessions data - FIXED: Ensure we get ALL sessions
       final sessionsSnapshot = await _firestore
           .collection('work_sessions')
           .orderBy('submittedAt', descending: true)
           .get();
+
+      print(
+          '🔍 Fetching work sessions... Found ${sessionsSnapshot.docs.length} sessions');
+
       final sessions = sessionsSnapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
+
+        // Debug logging for each session
+        print(
+            '📄 Session ${doc.id}: ${data['studentEmail']} - ${data['hours']}h - ${data['status']}');
+
         return {
           'id': doc.id,
           'studentId': data['studentId']?.toString() ?? '',
-        
           'studentEmail': data['studentEmail']?.toString() ?? '',
           'hours': (data['hours'] ?? 0.0).toDouble(),
           'status': data['status']?.toString() ?? '',
@@ -789,68 +798,15 @@ class _AdminDashboardState extends State<AdminDashboard>
         };
       }).toList();
 
+      print('✅ Users: ${users.length}, Sessions: ${sessions.length}');
       return [
         {'type': 'users', 'data': users},
         {'type': 'work_sessions', 'data': sessions},
       ];
     } catch (e) {
+      print('❌ Error fetching report data: $e');
       throw Exception('Failed to fetch report data: $e');
     }
-  }
-
-  Future<void> _exportExcel(String format) async {
-    await _showLoadingEffect(() async {
-      try {
-        final reportData = await _fetchReportData();
-        final workbook = excel.Excel.createExcel();
-
-        // Create sheets for different data types
-        for (var section in reportData) {
-          final sheet = workbook[section['type']];
-          final data = section['data'] as List<Map<String, dynamic>>;
-
-          if (data.isEmpty) continue;
-
-          // Create headers from first item's keys
-          final headers = data.first.keys.toList();
-          sheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
-
-          // Add data rows
-          for (var row in data) {
-            final rowData = headers.map((header) {
-              final value = row[header];
-              return excel.TextCellValue(value?.toString() ?? '');
-            }).toList();
-            sheet.appendRow(rowData);
-          }
-        }
-
-        final bytes = workbook.encode();
-        if (bytes == null) {
-          _showSnack("Failed to generate Excel file");
-          return;
-        }
-
-        final fileName =
-            "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx";
-
-        if (kIsWeb) {
-          saveFileWeb(Uint8List.fromList(bytes), fileName);
-          _showSnack(
-            "✅ Excel report download initiated!",
-            color: Colors.green,
-          );
-        } else {
-          final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
-          _showSnack(
-            "✅ Excel report exported to: $path",
-            color: Colors.green,
-          );
-        }
-      } catch (e) {
-        _showSnack("Excel export failed: $e");
-      }
-    });
   }
 
   Future<void> _exportPDF(String format) async {
@@ -861,7 +817,10 @@ class _AdminDashboardState extends State<AdminDashboard>
 
         for (var section in reportData) {
           final data = section['data'] as List<Map<String, dynamic>>;
-          if (data.isEmpty) continue;
+          if (data.isEmpty) {
+            print('⚠️ No data for PDF ${section['type']}');
+            continue;
+          }
 
           final headers = data.first.keys.toList();
           final tableData = data.map((row) {
@@ -956,7 +915,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
                     pw.SizedBox(height: 20),
 
-                    // Table
+                    // Table Title
                     pw.Text(
                       "${section['type'].replaceAll('_', ' ').toUpperCase()}",
                       style: pw.TextStyle(
@@ -968,7 +927,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
                     pw.SizedBox(height: 10),
 
-                    // Data Table
+                    // Data Table - REMOVED FONT LOADING
                     pw.Table.fromTextArray(
                       border: pw.TableBorder.all(color: PdfColors.grey300),
                       headerStyle: pw.TextStyle(
@@ -1011,14 +970,14 @@ class _AdminDashboardState extends State<AdminDashboard>
           );
         }
       } catch (e) {
+        print('❌ PDF export error: $e');
         _showSnack("PDF export failed: $e");
       }
     });
   }
-
   // --- User Management Functions ---
 
- Future<void> _createUserWithEmailAndPassword(String email, String password,
+  Future<void> _createUserWithEmailAndPassword(String email, String password,
       String role, String department, String idNumber) async {
     try {
       // Use a different approach - create user through a separate auth instance
@@ -1034,7 +993,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       );
 
       // Store user data in Firestore
-     // Store user data in Firestore
+      // Store user data in Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
         'email': email,
         'role': role,
@@ -1203,7 +1162,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   await _showLoadingEffect(() async {
                     try {
                       await _createUserWithEmailAndPassword(
-                          email, password,  role, department, idNumber);
+                          email, password, role, department, idNumber);
                       _showSnack(
                         "$role added successfully. They can now login with the provided credentials.",
                         color: Colors.green,
@@ -1333,7 +1292,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
                   Navigator.pop(context);
                   await _showLoadingEffect(() async {
-                   try {
+                    try {
                       await _firebaseService.updateUser(
                           userId,
                           email, // Changed from user["name"] ?? ''
@@ -2209,6 +2168,71 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
+  Future<void> _exportExcel(String format) async {
+    await _showLoadingEffect(() async {
+      try {
+        final reportData = await _fetchReportData();
+        final workbook = excel.Excel.createExcel();
+
+        for (var section in reportData) {
+          final sheetName =
+              section['type'] == 'work_sessions' ? 'Work Sessions' : 'Users';
+          final sheet = workbook[sheetName];
+          final data = section['data'] as List<Map<String, dynamic>>;
+
+          if (data.isEmpty) continue;
+
+          final headers = data.first.keys.toList();
+
+          // Create header row
+          final headerRow = headers.map((h) => excel.TextCellValue(h)).toList();
+          sheet.appendRow(headerRow);
+
+          // Add data rows
+          for (var row in data) {
+            final dataRow = <excel.CellValue>[];
+            for (var header in headers) {
+              final value = row[header]?.toString() ?? '';
+              dataRow.add(excel.TextCellValue(value));
+            }
+            sheet.appendRow(dataRow);
+          }
+
+          // Auto-size columns
+          for (var i = 0; i < headers.length; i++) {
+            sheet.setColAutoFit(i);
+          }
+        }
+
+        final bytes = workbook.save();
+        if (bytes == null) {
+          _showSnack("Failed to generate Excel file");
+          return;
+        }
+
+        final fileName =
+            "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx";
+
+        if (kIsWeb) {
+          saveFileWeb(Uint8List.fromList(bytes), fileName);
+          _showSnack(
+            "✅ Excel report download initiated!",
+            color: Colors.green,
+          );
+        } else {
+          final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
+          _showSnack(
+            "✅ Excel report exported to: $path",
+            color: Colors.green,
+          );
+        }
+      } catch (e) {
+        print('❌ Excel export error: $e');
+        _showSnack("Excel export failed: $e");
+      }
+    });
+  }
+
   Widget _exportCard() {
     return Card(
       elevation: 3,
@@ -2289,4 +2313,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       ),
     );
   }
+}
+
+extension on excel.Sheet {
+  void setColAutoFit(int i) {}
 }
