@@ -760,7 +760,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         return {
           'id': doc.id,
           'name': data['name']?.toString() ?? '',
-          'email': data['email']?.toString() ?? '',
+         
           'role': data['role']?.toString() ?? '',
           'status': data['status']?.toString() ?? '',
           'department': data['department']?.toString() ?? '',
@@ -778,7 +778,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         return {
           'id': doc.id,
           'studentId': data['studentId']?.toString() ?? '',
-          'studentName': data['studentName']?.toString() ?? '',
+        
           'studentEmail': data['studentEmail']?.toString() ?? '',
           'hours': (data['hours'] ?? 0.0).toDouble(),
           'status': data['status']?.toString() ?? '',
@@ -1018,8 +1018,8 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   // --- User Management Functions ---
 
-  Future<void> _createUserWithEmailAndPassword(String email, String password,
-      String name, String role, String department, String idNumber) async {
+ Future<void> _createUserWithEmailAndPassword(String email, String password,
+      String role, String department, String idNumber) async {
     try {
       // Use a different approach - create user through a separate auth instance
       // This prevents auto-signin
@@ -1034,8 +1034,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       );
 
       // Store user data in Firestore
+     // Store user data in Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
-        'name': name,
         'email': email,
         'role': role,
         'department': department,
@@ -1203,7 +1203,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   await _showLoadingEffect(() async {
                     try {
                       await _createUserWithEmailAndPassword(
-                          email, password, name, role, department, idNumber);
+                          email, password,  role, department, idNumber);
                       _showSnack(
                         "$role added successfully. They can now login with the provided credentials.",
                         color: Colors.green,
@@ -1333,11 +1333,10 @@ class _AdminDashboardState extends State<AdminDashboard>
 
                   Navigator.pop(context);
                   await _showLoadingEffect(() async {
-                    try {
+                   try {
                       await _firebaseService.updateUser(
                           userId,
-                          user["name"] ?? '',
-                          email,
+                          email, // Changed from user["name"] ?? ''
                           role,
                           department,
                           idNumber);

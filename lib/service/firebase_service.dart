@@ -28,17 +28,25 @@ class FirebaseService {
   }
 
   // Update user role and details - UPDATED with new parameters
-  Future<void> updateUser(String userId, String email, String role, String name,
-      String department, String idNumber) async {
-    await _firestore.collection('users').doc(userId).update({
-      'email': email,
-      'name': name,
-      'role': role,
-      'roleLower': role.toLowerCase(),
-      'department': department,
-      'idNumber': idNumber,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+ Future<void> updateUser(
+    String userId,
+    String email,
+    String role,
+    String department,
+    String idNumber,
+  ) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'email': email,
+        'role': role,
+        'department': department,
+        'idNumber': idNumber,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating user: $e');
+      rethrow;
+    }
   }
 
   // Update user status (approve/decline)

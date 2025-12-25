@@ -797,7 +797,7 @@ class FirebaseService {
     try {
       return _firestore
           .collection('users')
-          .orderBy('createdAt', descending: true) // Add ordering for consistency
+          .orderBy('createdAt', descending: true)
           .snapshots();
     } catch (e) {
       print('Error getting users stream: $e');
@@ -807,14 +807,20 @@ class FirebaseService {
   }
 
   // IMPROVED: Add user with better error handling
-  Future<void> addUser(String email, String role, String name) async {
+  Future<void> addUser(
+    String email,
+    String role,
+    String department,
+    String idNumber,
+  ) async {
     try {
       await _firestore.collection('users').add({
         'email': email,
         'role': role,
-        'name': name,
+        'department': department,
+        'idNumber': idNumber,
         'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(), // Add timestamp for ordering
+        'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -836,14 +842,20 @@ class FirebaseService {
     }
   }
 
-  // IMPROVED: Update user with better performance
+  // FIXED: Update user without name parameter
   Future<void> updateUser(
-      String userId, String email, String role, String name) async {
+    String userId,
+    String email,
+    String role,
+    String department,
+    String idNumber,
+  ) async {
     try {
       await _firestore.collection('users').doc(userId).update({
         'email': email,
         'role': role,
-        'name': name,
+        'department': department,
+        'idNumber': idNumber,
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
