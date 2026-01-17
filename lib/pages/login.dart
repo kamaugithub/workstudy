@@ -396,7 +396,7 @@ class _LoginPageState extends State<LoginPage> {
                         backgroundColor: Colors.transparent,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
+                          borderRadius: BorderRadius.circular(25),
                         ),
                         padding: EdgeInsets.zero,
                       ),
