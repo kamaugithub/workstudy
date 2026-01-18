@@ -993,7 +993,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       );
 
       // Store user data in Firestore
-      // Store user data in Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
         'email': email,
         'role': role,
@@ -1058,7 +1057,6 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   void _addUserDialog(String role) {
     final emailController = TextEditingController();
-    final nameController = TextEditingController();
     final idNumberController = TextEditingController();
     final passwordController = TextEditingController();
     final departmentController = TextEditingController();
@@ -1075,14 +1073,6 @@ class _AdminDashboardState extends State<AdminDashboard>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: "Full Name",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: emailController,
@@ -1142,13 +1132,11 @@ class _AdminDashboardState extends State<AdminDashboard>
               ElevatedButton(
                 onPressed: () async {
                   final email = emailController.text.trim();
-                  final name = nameController.text.trim();
                   final idNumber = idNumberController.text.trim();
                   final department = departmentController.text.trim();
                   final password = passwordController.text.trim();
 
                   if (!_isValidEmail(email) ||
-                      name.isEmpty ||
                       idNumber.isEmpty ||
                       department.isEmpty ||
                       password.length < 6) {
