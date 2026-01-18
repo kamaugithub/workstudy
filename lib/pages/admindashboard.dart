@@ -82,7 +82,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     super.dispose();
   }
 
-  // --- MAIN DATA LOADING METHOD ---
+  // --- MAIN DATA LOADING METHOD --- with DEBUG LOGS
   Future<void> _loadAllData() async {
     if (_isRefreshing) return;
 
@@ -91,6 +91,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       _isRefreshing = true;
     });
 
+    print('🔄 ===== STARTING DATA LOAD =====');
+
     try {
       await Future.wait([
         _loadDashboardStats(),
@@ -98,15 +100,16 @@ class _AdminDashboardState extends State<AdminDashboard>
         _loadEmailLists(),
       ]);
       _lastRefreshTime = DateTime.now();
-      print('All data loaded successfully');
+      print('✅ All data loaded successfully at $_lastRefreshTime');
     } catch (e) {
-      print('Error loading all data: $e');
+      print('❌ Error loading all data: $e');
       _showSnack("Error loading dashboard data: $e");
     } finally {
       setState(() {
         isLoading = false;
         _isRefreshing = false;
       });
+      print('🔄 ===== DATA LOAD COMPLETE =====');
     }
   }
 
@@ -159,16 +162,21 @@ class _AdminDashboardState extends State<AdminDashboard>
   // Load email lists for clickable cards - UPDATED to fetch real data
   Future<void> _loadEmailLists() async {
     try {
+      print('📧 Loading email lists...');
+
       // Load students emails
       final studentsSnapshot = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'Student')
+          .where('status', isEqualTo: 'approved')
           .get();
 
+      print('🎓 Approved students found: ${studentsSnapshot.docs.length}');
       _studentsEmails = studentsSnapshot.docs
           .map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final email = data['email']?.toString().trim() ?? '';
+            print('   👨‍🎓 Student: $email');
             return email;
           })
           .where((email) => email.isNotEmpty && _isValidEmail(email))
@@ -178,61 +186,269 @@ class _AdminDashboardState extends State<AdminDashboard>
       final supervisorsSnapshot = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'Supervisor')
+          .where('status', isEqualTo: 'approved')
           .get();
 
+      print(
+          '👨‍🏫 Approved supervisors found: ${supervisorsSnapshot.docs.length}');
       _supervisorsEmails = supervisorsSnapshot.docs
           .map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final email = data['email']?.toString().trim() ?? '';
+            print('   👨‍🏫 Supervisor: $email');
             return email;
           })
           .where((email) => email.isNotEmpty && _isValidEmail(email))
           .toList();
 
-      // Load pending activities - fetch ALL pending sessions
-      final pendingSessions = await _firestore
-          .collection('work_sessions')
+      // Load pending users (users with 'pending' status)
+      final pendingUsersSnapshot = await _firestore
+          .collection('users')
           .where('status', isEqualTo: 'pending')
           .get();
 
-      _pendingActivities = pendingSessions.docs.map((doc) {
+      print('⏳ Pending users found: ${pendingUsersSnapshot.docs.length}');
+      _pendingActivities = pendingUsersSnapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
+        print('   ⏳ Pending user: ${data['email']} - ${data['role']}');
         return {
-          'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
-          'hours': (data['hours'] ?? 0.0).toDouble(),
-          'date': data['date']?.toString() ?? 'No date',
-          'description': data['reportDetails']?.toString() ?? 'No description',
-          'studentName': data['studentName']?.toString() ?? 'Unknown',
+          'email': data['email']?.toString().trim() ?? 'No email',
+          'role': data['role']?.toString() ?? 'Unknown',
+          'idNumber': data['idNumber']?.toString() ?? 'No ID',
+          'department': data['department']?.toString() ?? 'No department',
+          'createdAt': data['createdAt'],
         };
       }).toList();
 
-      // Load approved activities for hours calculation - fetch ALL approved sessions
+      // Load approved activities for hours calculation
       final approvedSessions = await _firestore
           .collection('work_sessions')
           .where('status', isEqualTo: 'approved')
           .get();
 
+      print('✅ Approved work sessions: ${approvedSessions.docs.length}');
       _approvedActivities = approvedSessions.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
+        print(
+            '   ✅ Approved session: ${data['studentEmail']} - ${data['hours']}h');
         return {
           'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
           'hours': (data['hours'] ?? 0.0).toDouble(),
           'date': data['date']?.toString() ?? 'No date',
           'studentName': data['studentName']?.toString() ?? 'Unknown',
+          'department': data['department']?.toString() ?? 'Unknown',
+          'supervisorEmail':
+              data['supervisorEmail']?.toString().trim() ?? 'No supervisor',
         };
       }).toList();
 
-      print('Loaded ${_studentsEmails.length} student emails');
-      print('Loaded ${_supervisorsEmails.length} supervisor emails');
-      print('Loaded ${_pendingActivities.length} pending activities');
-      print('Loaded ${_approvedActivities.length} approved activities');
+      print('📊 Summary:');
+      print('- Students: ${_studentsEmails.length}');
+      print('- Supervisors: ${_supervisorsEmails.length}');
+      print('- Pending users: ${_pendingActivities.length}');
+      print('- Approved sessions: ${_approvedActivities.length}');
     } catch (e) {
-      print('Error loading email lists: $e');
+      print('❌ Error loading email lists: $e');
+      print('Stack trace: ${e.toString()}');
       // Initialize empty lists to avoid null errors
       _studentsEmails = [];
       _supervisorsEmails = [];
       _pendingActivities = [];
       _approvedActivities = [];
+    }
+  }
+
+  // Load dashboard statistics - WITH ENHANCED DEBUG LOGGING
+  Future<void> _loadDashboardStats() async {
+    try {
+      print('📊 Loading dashboard stats...');
+
+      // Fetch all users to get counts
+      final allUsers = await _firestore.collection('users').get();
+      print('👥 Total users in database: ${allUsers.docs.length}');
+
+      // Print ALL users to see what's actually in the database
+      for (var doc in allUsers.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        print(
+            '   📍 User: ${data['email']} | Role: ${data['role']} | Status: ${data['status']}');
+      }
+
+      int totalStudents = 0;
+      int totalSupervisors = 0;
+      int pendingApprovals = 0;
+
+      for (var doc in allUsers.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final role = data['role']?.toString() ?? '';
+        final status = data['status']?.toString() ?? '';
+
+        if (role == 'Student') {
+          if (status == 'approved') {
+            totalStudents++;
+            print('   ✅ Approved Student: ${data['email']}');
+          } else if (status == 'pending') {
+            pendingApprovals++;
+            print('   ⏳ Pending Student: ${data['email']}');
+          }
+        } else if (role == 'Supervisor') {
+          if (status == 'approved') {
+            totalSupervisors++;
+            print('   ✅ Approved Supervisor: ${data['email']}');
+          } else if (status == 'pending') {
+            pendingApprovals++;
+            print('   ⏳ Pending Supervisor: ${data['email']}');
+          }
+        }
+      }
+
+      // Fetch approved sessions for total hours
+      final approvedSessions = await _firestore
+          .collection('work_sessions')
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      print('⏰ Approved work sessions found: ${approvedSessions.docs.length}');
+
+      // Print all approved sessions
+      for (var session in approvedSessions.docs) {
+        final data = session.data() as Map<String, dynamic>;
+        print(
+            '   ✅ Session: ${data['studentEmail']} - ${data['hours']}h - ${data['date']}');
+      }
+
+      // Calculate total hours approved with better error handling
+      double totalHoursApproved = 0.0;
+      for (var session in approvedSessions.docs) {
+        final data = session.data() as Map<String, dynamic>;
+        final hours = data['hours'];
+        if (hours != null) {
+          if (hours is int) {
+            totalHoursApproved += hours.toDouble();
+          } else if (hours is double) {
+            totalHoursApproved += hours;
+          } else if (hours is String) {
+            totalHoursApproved += double.tryParse(hours) ?? 0.0;
+          }
+        }
+      }
+
+      print('📈 Calculated stats:');
+      print('- Approved Students: $totalStudents');
+      print('- Approved Supervisors: $totalSupervisors');
+      print('- Pending User Approvals: $pendingApprovals');
+      print('- Total Hours Approved: $totalHoursApproved');
+
+      setState(() {
+        stats = {
+          "totalStudents": totalStudents,
+          "totalSupervisors": totalSupervisors,
+          "pendingApprovals": pendingApprovals,
+          "totalHoursApproved": totalHoursApproved,
+        };
+      });
+    } catch (e) {
+      print('❌ Error loading dashboard stats: $e');
+      print('Stack trace: ${e.toString()}');
+      throw Exception('Failed to load dashboard stats: $e');
+    }
+  }
+
+  // Load report statistics - WITH ENHANCED DEBUG LOGGING
+  Future<void> _loadReportStats() async {
+    try {
+      final now = DateTime.now();
+      final currentMonthStart = DateTime(now.year, now.month, 1);
+      final lastMonthStart = DateTime(now.year, now.month - 1, 1);
+
+      print('📅 Loading report stats for:');
+      print(
+          '   - Current month: ${now.year}-${now.month} ($currentMonthStart)');
+      print(
+          '   - Last month: ${lastMonthStart.year}-${lastMonthStart.month} ($lastMonthStart)');
+
+      // Fetch ALL approved work sessions
+      final allApprovedSessions = await _firestore
+          .collection('work_sessions')
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      print('📋 Total approved sessions: ${allApprovedSessions.docs.length}');
+
+      double thisMonthHours = 0.0;
+      double lastMonthHours = 0.0;
+
+      for (var session in allApprovedSessions.docs) {
+        final data = session.data() as Map<String, dynamic>;
+        final submittedAt = parseAnyTimestamp(data['submittedAt']);
+        final hours = data['hours'];
+        final studentEmail = data['studentEmail'];
+
+        if (submittedAt != null && hours != null) {
+          double hourValue = 0.0;
+          if (hours is int) {
+            hourValue = hours.toDouble();
+          } else if (hours is double) {
+            hourValue = hours;
+          } else if (hours is String) {
+            hourValue = double.tryParse(hours) ?? 0.0;
+          }
+
+          // Check if this month
+          if (submittedAt.year == now.year && submittedAt.month == now.month) {
+            thisMonthHours += hourValue;
+            print(
+                '   📅 This month session: $studentEmail - $hourValue on ${DateFormat('yyyy-MM-dd').format(submittedAt)}');
+          }
+
+          // Check if last month
+          if (submittedAt.year == lastMonthStart.year &&
+              submittedAt.month == lastMonthStart.month) {
+            lastMonthHours += hourValue;
+            print(
+                '   📅 Last month session: $studentEmail - $hourValue on ${DateFormat('yyyy-MM-dd').format(submittedAt)}');
+          }
+        } else {
+          print('   ⚠️ Session missing date/hours: $studentEmail');
+        }
+      }
+
+      // Get total active students (with approved status)
+      final activeStudents = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'Student')
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      final totalActiveStudents = activeStudents.docs.length;
+      final avgHours = totalActiveStudents > 0
+          ? (thisMonthHours / totalActiveStudents)
+          : 0.0;
+
+      print('📊 Calculated report stats:');
+      print('- This month hours: $thisMonthHours');
+      print('- Last month hours: $lastMonthHours');
+      print('- Active students: $totalActiveStudents');
+      print('- Avg hours/student: $avgHours');
+
+      setState(() {
+        reportStats = {
+          "thisMonthHours": thisMonthHours,
+          "lastMonthHours": lastMonthHours,
+          "avgHoursPerStudent": avgHours,
+        };
+      });
+    } catch (e) {
+      print('❌ Error loading report stats: $e');
+      print('Stack trace: ${e.toString()}');
+      // Don't throw exception, just set default values
+      setState(() {
+        reportStats = {
+          "thisMonthHours": 0.0,
+          "lastMonthHours": 0.0,
+          "avgHoursPerStudent": 0.0,
+        };
+      });
     }
   }
 
@@ -406,7 +622,61 @@ class _AdminDashboardState extends State<AdminDashboard>
         },
       );
     } else if (cardType == 'pending') {
-      // Pending approvals
+      // Pending approvals (users pending admin approval, not work sessions)
+      return ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: data.length,
+        itemBuilder: (context, index) {
+          final user = data[index] as Map<String, dynamic>;
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            elevation: 2,
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: color.withOpacity(0.1),
+                child: Icon(
+                  Icons.person_add,
+                  color: color,
+                ),
+              ),
+              title: Text(
+                user['email'] ?? 'No email',
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 4),
+                  Text(
+                    'ID: ${user['idNumber'] ?? 'No ID'}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  Text(
+                    'Department: ${user['department'] ?? 'No department'}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  Text(
+                    'Role: ${user['role'] ?? 'Unknown'}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      // Hours approved - show list of all approved hours by department
       return ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: data.length,
@@ -419,12 +689,12 @@ class _AdminDashboardState extends State<AdminDashboard>
               leading: CircleAvatar(
                 backgroundColor: color.withOpacity(0.1),
                 child: Icon(
-                  Icons.pending_actions,
+                  Icons.check_circle,
                   color: color,
                 ),
               ),
               title: Text(
-                activity['studentEmail'],
+                activity['studentEmail'] ?? 'No student',
                 style:
                     const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
               ),
@@ -433,32 +703,34 @@ class _AdminDashboardState extends State<AdminDashboard>
                 children: [
                   const SizedBox(height: 4),
                   Text(
-                    '${activity['hours']} hours',
+                    '${activity['hours']?.toStringAsFixed(1) ?? '0.0'} hours',
                     style: TextStyle(
                       fontSize: 13,
                       color: Colors.grey[700],
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   Text(
-                    'Date: ${activity['date']}',
+                    'Department: ${activity['department'] ?? 'Unknown'}',
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey[600],
                     ),
                   ),
-                  if (activity['description'] != null &&
-                      activity['description'].isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        activity['description'],
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontStyle: FontStyle.italic,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                  Text(
+                    'Date: ${activity['date'] ?? 'No date'}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  if (activity['supervisorEmail'] != null &&
+                      activity['supervisorEmail'].isNotEmpty)
+                    Text(
+                      'Supervisor: ${activity['supervisorEmail']}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
                       ),
                     ),
                 ],
@@ -467,252 +739,31 @@ class _AdminDashboardState extends State<AdminDashboard>
           );
         },
       );
-    } else {
-      // Hours approved
-      // Group hours by student
-      final Map<String, double> hoursByStudent = {};
-      final Map<String, String> studentNames = {};
-
-      for (var activity in data.cast<Map<String, dynamic>>()) {
-        final email = activity['studentEmail'];
-        final hours = activity['hours'];
-        final name = activity['studentName'];
-
-        if (email != null && email.isNotEmpty) {
-          hoursByStudent[email] = (hoursByStudent[email] ?? 0.0) + hours;
-          if (name != null && name.isNotEmpty) {
-            studentNames[email] = name;
-          }
-        }
-      }
-
-      // Convert to list for display
-      final sortedEntries = hoursByStudent.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-
-      return ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: sortedEntries.length,
-        itemBuilder: (context, index) {
-          final entry = sortedEntries[index];
-          final studentName = studentNames[entry.key] ?? entry.key;
-
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            elevation: 2,
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: color.withOpacity(0.1),
-                child: Icon(
-                  Icons.check_circle,
-                  color: color,
-                ),
-              ),
-              title: Text(
-                studentName,
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              ),
-              subtitle: Text(
-                entry.key,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
-              ),
-              trailing: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${entry.value.toStringAsFixed(1)} hrs',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      );
     }
   }
 
-  // Load dashboard statistics - FIXED for proper data fetching
-  Future<void> _loadDashboardStats() async {
+  // Load pending users (users with 'pending' status)
+  Future<List<Map<String, dynamic>>> _loadPendingUsers() async {
     try {
-      print('Loading dashboard stats...');
-
-      // Fetch all users to get counts
-      final allUsers = await _firestore.collection('users').get();
-
-      int totalStudents = 0;
-      int totalSupervisors = 0;
-
-      for (var doc in allUsers.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final role = data['role']?.toString() ?? '';
-        if (role == 'Student') {
-          totalStudents++;
-        } else if (role == 'Supervisor') {
-          totalSupervisors++;
-        }
-      }
-
-      // Fetch pending sessions
-      final pendingSessions = await _firestore
-          .collection('work_sessions')
+      final pendingUsersSnapshot = await _firestore
+          .collection('users')
           .where('status', isEqualTo: 'pending')
           .get();
 
-      // Fetch approved sessions for total hours
-      final approvedSessions = await _firestore
-          .collection('work_sessions')
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      // Calculate total hours approved with better error handling
-      double totalHoursApproved = 0.0;
-      for (var session in approvedSessions.docs) {
-        final data = session.data() as Map<String, dynamic>;
-        final hours = data['hours'];
-        if (hours != null) {
-          if (hours is int) {
-            totalHoursApproved += hours.toDouble();
-          } else if (hours is double) {
-            totalHoursApproved += hours;
-          } else if (hours is String) {
-            totalHoursApproved += double.tryParse(hours) ?? 0.0;
-          }
-        }
-      }
-
-      print('Calculated stats:');
-      print('- Students: $totalStudents');
-      print('- Supervisors: $totalSupervisors');
-      print('- Pending: ${pendingSessions.docs.length}');
-      print('- Hours: $totalHoursApproved');
-
-      setState(() {
-        stats = {
-          "totalStudents": totalStudents,
-          "totalSupervisors": totalSupervisors,
-          "pendingApprovals": pendingSessions.docs.length,
-          "totalHoursApproved": totalHoursApproved,
+      return pendingUsersSnapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return {
+          'id': doc.id,
+          'email': data['email']?.toString() ?? '',
+          'role': data['role']?.toString() ?? '',
+          'department': data['department']?.toString() ?? '',
+          'idNumber': data['idNumber']?.toString() ?? '',
+          'createdAt': data['createdAt'],
         };
-      });
+      }).toList();
     } catch (e) {
-      print('Error loading dashboard stats: $e');
-      throw Exception('Failed to load dashboard stats: $e');
-    }
-  }
-
-  // Load report statistics - FIXED for better month calculations
-  Future<void> _loadReportStats() async {
-    try {
-      final now = DateTime.now();
-      final currentMonthStart = DateTime(now.year, now.month, 1);
-      final nextMonthStart = DateTime(now.year, now.month + 1, 1);
-      final lastMonthStart = DateTime(now.year, now.month - 1, 1);
-      final lastMonthEnd = DateTime(now.year, now.month, 0, 23, 59, 59);
-
-      print('Loading report stats for current month: ${now.year}-${now.month}');
-
-      // Use Timestamps for querying
-      final currentMonthTimestamp = Timestamp.fromDate(currentMonthStart);
-      final nextMonthTimestamp = Timestamp.fromDate(nextMonthStart);
-      final lastMonthTimestamp = Timestamp.fromDate(lastMonthStart);
-      final lastMonthEndTimestamp = Timestamp.fromDate(lastMonthEnd);
-
-      print('Date ranges:');
-      print('- This month: $currentMonthStart to $nextMonthStart');
-      print('- Last month: $lastMonthStart to $lastMonthEnd');
-
-      // Fetch work sessions for this month - assuming submittedAt field exists
-      final thisMonthSessions = await _firestore
-          .collection('work_sessions')
-          .where('submittedAt', isGreaterThanOrEqualTo: currentMonthTimestamp)
-          .where('submittedAt', isLessThan: nextMonthTimestamp)
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      print('Found ${thisMonthSessions.docs.length} sessions this month');
-
-      // Fetch work sessions for last month
-      final lastMonthSessions = await _firestore
-          .collection('work_sessions')
-          .where('submittedAt', isGreaterThanOrEqualTo: lastMonthTimestamp)
-          .where('submittedAt', isLessThanOrEqualTo: lastMonthEndTimestamp)
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      print('Found ${lastMonthSessions.docs.length} sessions last month');
-
-      // Calculate total hours
-      double thisMonthHours = 0.0;
-      double lastMonthHours = 0.0;
-
-      for (var session in thisMonthSessions.docs) {
-        final data = session.data() as Map<String, dynamic>;
-        final hours = data['hours'];
-        if (hours != null) {
-          if (hours is int) {
-            thisMonthHours += hours.toDouble();
-          } else if (hours is double) {
-            thisMonthHours += hours;
-          } else if (hours is String) {
-            thisMonthHours += double.tryParse(hours) ?? 0.0;
-          }
-        }
-      }
-
-      for (var session in lastMonthSessions.docs) {
-        final data = session.data() as Map<String, dynamic>;
-        final hours = data['hours'];
-        if (hours != null) {
-          if (hours is int) {
-            lastMonthHours += hours.toDouble();
-          } else if (hours is double) {
-            lastMonthHours += hours;
-          } else if (hours is String) {
-            lastMonthHours += double.tryParse(hours) ?? 0.0;
-          }
-        }
-      }
-
-      // Get total active students (with approved status)
-      final activeStudents = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'Student')
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      final totalActiveStudents = activeStudents.docs.length;
-      final avgHours = totalActiveStudents > 0
-          ? (thisMonthHours / totalActiveStudents)
-          : 0.0;
-
-      print('Calculated report stats:');
-      print('- This month hours: $thisMonthHours');
-      print('- Last month hours: $lastMonthHours');
-      print(
-          '- Avg hours/student: $avgHours (for $totalActiveStudents active students)');
-
-      setState(() {
-        reportStats = {
-          "thisMonthHours": thisMonthHours,
-          "lastMonthHours": lastMonthHours,
-          "avgHoursPerStudent": avgHours,
-        };
-      });
-    } catch (e) {
-      print('Error loading report stats: $e');
-      throw Exception('Failed to load report stats: $e');
+      print('Error loading pending users: $e');
+      return [];
     }
   }
 
@@ -1466,7 +1517,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Overview Tab --- UPDATED for better display
+  // --- Overview Tab --- UPDATED with correct data fetching
   Widget _buildOverviewTab() {
     final bool hasStats = stats.isNotEmpty && stats["totalStudents"] != null;
 
@@ -1598,7 +1649,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             const SizedBox(height: 20),
 
-            // Quick Stats Summary
+            // Monthly Hours Summary - Updated with real data
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1686,45 +1737,15 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
 
-            // Data Status Indicator
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.withOpacity(0.2)),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _pendingActivities.isNotEmpty
-                        ? Icons.warning
-                        : Icons.check_circle,
-                    color: _pendingActivities.isNotEmpty
-                        ? Colors.orange
-                        : Colors.green,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _pendingActivities.isNotEmpty
-                          ? "${_pendingActivities.length} pending approvals need attention"
-                          : "All clear! No pending approvals",
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // REMOVED the duplicate "All clear! No pending approvals" section
+            // This was the second attached image part you wanted removed
           ],
         ),
       ),
     );
   }
 
-  // --- Users Tab ---
+  // --- Users Tab --- UNCHANGED
   Widget _buildUsersTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -1932,7 +1953,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Reports Tab ---
+  // --- Reports Tab --- UNCHANGED
   Widget _buildReportsTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -1942,7 +1963,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Helper Widgets ---
+  // --- Helper Widgets --- UNCHANGED
   Widget _loadingStatCard() {
     return Container(
       decoration: BoxDecoration(
