@@ -1124,7 +1124,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Users Tab --- UNCHANGED
+  // --- Users Tab --- 
   Widget _buildUsersTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -1243,7 +1243,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Email only - no name displayed
+                            // Email only 
                             Text(
                               email,
                               style: const TextStyle(
@@ -1332,7 +1332,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Reports Tab --- UNCHANGED
+  // --- Reports Tab ---
   Widget _buildReportsTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
