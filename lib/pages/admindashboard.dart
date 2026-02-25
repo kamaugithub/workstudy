@@ -38,6 +38,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     "totalSupervisors": 0,
     "pendingApprovals": 0,
     "totalHoursApproved": 0.0,
+    "totalUsers": 0,
   };
 
   Map<String, dynamic> reportStats = {
@@ -51,7 +52,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   bool _isRefreshing = false;
   DateTime? _lastRefreshTime;
 
-  // New state variables for clickable cards
+  // State variables for clickable cards
   String? _expandedCard;
   List<String> _studentsEmails = [];
   List<String> _supervisorsEmails = [];
@@ -159,106 +160,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     return DateFormat('yyyy-MM-dd HH:mm:ss').format(dateTime);
   }
 
-  // Load email lists for clickable cards - UPDATED to fetch real data
-  Future<void> _loadEmailLists() async {
-    try {
-      print('📧 Loading email lists...');
-
-      // Load students emails
-      final studentsSnapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'Student')
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      print('🎓 Approved students found: ${studentsSnapshot.docs.length}');
-      _studentsEmails = studentsSnapshot.docs
-          .map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final email = data['email']?.toString().trim() ?? '';
-            print('   👨‍🎓 Student: $email');
-            return email;
-          })
-          .where((email) => email.isNotEmpty && _isValidEmail(email))
-          .toList();
-
-      // Load supervisors emails
-      final supervisorsSnapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'Supervisor')
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      print(
-          '👨‍🏫 Approved supervisors found: ${supervisorsSnapshot.docs.length}');
-      _supervisorsEmails = supervisorsSnapshot.docs
-          .map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final email = data['email']?.toString().trim() ?? '';
-            print('   👨‍🏫 Supervisor: $email');
-            return email;
-          })
-          .where((email) => email.isNotEmpty && _isValidEmail(email))
-          .toList();
-
-      // Load pending users (users with 'pending' status)
-      final pendingUsersSnapshot = await _firestore
-          .collection('users')
-          .where('status', isEqualTo: 'pending')
-          .get();
-
-      print('⏳ Pending users found: ${pendingUsersSnapshot.docs.length}');
-      _pendingActivities = pendingUsersSnapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        print('   ⏳ Pending user: ${data['email']} - ${data['role']}');
-        return {
-          'email': data['email']?.toString().trim() ?? 'No email',
-          'role': data['role']?.toString() ?? 'Unknown',
-          'idNumber': data['idNumber']?.toString() ?? 'No ID',
-          'department': data['department']?.toString() ?? 'No department',
-          'createdAt': data['createdAt'],
-        };
-      }).toList();
-
-      // Load approved activities for hours calculation
-      final approvedSessions = await _firestore
-          .collection('work_sessions')
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      print('✅ Approved work sessions: ${approvedSessions.docs.length}');
-      _approvedActivities = approvedSessions.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        print(
-            '   ✅ Approved session: ${data['studentEmail']} - ${data['hours']}h');
-        return {
-          'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
-          'hours': (data['hours'] ?? 0.0).toDouble(),
-          'date': data['date']?.toString() ?? 'No date',
-          'studentName': data['studentName']?.toString() ?? 'Unknown',
-          'department': data['department']?.toString() ?? 'Unknown',
-          'supervisorEmail':
-              data['supervisorEmail']?.toString().trim() ?? 'No supervisor',
-        };
-      }).toList();
-
-      print('📊 Summary:');
-      print('- Students: ${_studentsEmails.length}');
-      print('- Supervisors: ${_supervisorsEmails.length}');
-      print('- Pending users: ${_pendingActivities.length}');
-      print('- Approved sessions: ${_approvedActivities.length}');
-    } catch (e) {
-      print('❌ Error loading email lists: $e');
-      print('Stack trace: ${e.toString()}');
-      // Initialize empty lists to avoid null errors
-      _studentsEmails = [];
-      _supervisorsEmails = [];
-      _pendingActivities = [];
-      _approvedActivities = [];
-    }
-  }
-
-  // Load dashboard statistics - WITH ENHANCED DEBUG LOGGING
+  // Load dashboard statistics - FIXED to show ALL users correctly
   Future<void> _loadDashboardStats() async {
     try {
       print('📊 Loading dashboard stats...');
@@ -277,27 +179,40 @@ class _AdminDashboardState extends State<AdminDashboard>
       int totalStudents = 0;
       int totalSupervisors = 0;
       int pendingApprovals = 0;
+      int otherUsers = 0; // Track users with other roles
 
       for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
         final role = data['role']?.toString() ?? '';
-        final status = data['status']?.toString() ?? '';
+        final status = data['status']?.toString()?.toLowerCase() ?? '';
 
+        // Count ALL students regardless of status (for Students card)
         if (role == 'Student') {
-          if (status == 'approved') {
-            totalStudents++;
-            print('   ✅ Approved Student: ${data['email']}');
-          } else if (status == 'pending') {
+          totalStudents++;
+          if (status == 'pending') {
             pendingApprovals++;
             print('   ⏳ Pending Student: ${data['email']}');
+          } else if (status == 'approved') {
+            print('   ✅ Approved Student: ${data['email']}');
           }
-        } else if (role == 'Supervisor') {
-          if (status == 'approved') {
-            totalSupervisors++;
-            print('   ✅ Approved Supervisor: ${data['email']}');
-          } else if (status == 'pending') {
+        }
+        // Count ALL supervisors regardless of status (for Supervisors card)
+        else if (role == 'Supervisor') {
+          totalSupervisors++;
+          if (status == 'pending') {
             pendingApprovals++;
             print('   ⏳ Pending Supervisor: ${data['email']}');
+          } else if (status == 'approved') {
+            print('   ✅ Approved Supervisor: ${data['email']}');
+          }
+        }
+        // Count users with other roles or missing roles
+        else {
+          otherUsers++;
+          print('   👤 Other User: ${data['email']} | Role: $role | Status: $status');
+          // If they're pending, count them in pending approvals
+          if (status == 'pending') {
+            pendingApprovals++;
           }
         }
       }
@@ -310,14 +225,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
       print('⏰ Approved work sessions found: ${approvedSessions.docs.length}');
 
-      // Print all approved sessions
-      for (var session in approvedSessions.docs) {
-        final data = session.data() as Map<String, dynamic>;
-        print(
-            '   ✅ Session: ${data['studentEmail']} - ${data['hours']}h - ${data['date']}');
-      }
-
-      // Calculate total hours approved with better error handling
+      // Calculate total hours approved
       double totalHoursApproved = 0.0;
       for (var session in approvedSessions.docs) {
         final data = session.data() as Map<String, dynamic>;
@@ -334,10 +242,12 @@ class _AdminDashboardState extends State<AdminDashboard>
       }
 
       print('📈 Calculated stats:');
-      print('- Approved Students: $totalStudents');
-      print('- Approved Supervisors: $totalSupervisors');
-      print('- Pending User Approvals: $pendingApprovals');
+      print('- Total Students (all): $totalStudents');
+      print('- Total Supervisors (all): $totalSupervisors');
+      print('- Other Users: $otherUsers');
+      print('- Pending Approvals: $pendingApprovals');
       print('- Total Hours Approved: $totalHoursApproved');
+      print('- TOTAL USERS IN DB: ${allUsers.docs.length}');
 
       setState(() {
         stats = {
@@ -345,6 +255,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           "totalSupervisors": totalSupervisors,
           "pendingApprovals": pendingApprovals,
           "totalHoursApproved": totalHoursApproved,
+          "totalUsers": allUsers.docs.length, // Add total users count
         };
       });
     } catch (e) {
@@ -452,6 +363,103 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
+  // Load email lists for clickable cards - FIXED to show ALL users
+  Future<void> _loadEmailLists() async {
+    try {
+      print('📧 Loading email lists...');
+
+      // Load ALL students (not just approved)
+      final studentsSnapshot = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'Student')
+          .get();
+
+      print('🎓 All students found: ${studentsSnapshot.docs.length}');
+      _studentsEmails = studentsSnapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final email = data['email']?.toString().trim() ?? '';
+            final status = data['status']?.toString() ?? 'unknown';
+            print('   👨‍🎓 Student: $email (Status: $status)');
+            return email;
+          })
+          .where((email) => email.isNotEmpty && _isValidEmail(email))
+          .toList();
+
+      // Load ALL supervisors (not just approved)
+      final supervisorsSnapshot = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'Supervisor')
+          .get();
+
+      print('👨‍🏫 All supervisors found: ${supervisorsSnapshot.docs.length}');
+      _supervisorsEmails = supervisorsSnapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final email = data['email']?.toString().trim() ?? '';
+            final status = data['status']?.toString() ?? 'unknown';
+            print('   👨‍🏫 Supervisor: $email (Status: $status)');
+            return email;
+          })
+          .where((email) => email.isNotEmpty && _isValidEmail(email))
+          .toList();
+
+      // Load ALL pending users (regardless of role)
+      final pendingUsersSnapshot = await _firestore
+          .collection('users')
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      print('⏳ Pending users found: ${pendingUsersSnapshot.docs.length}');
+      _pendingActivities = pendingUsersSnapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        print('   ⏳ Pending user: ${data['email']} - ${data['role']}');
+        return {
+          'email': data['email']?.toString().trim() ?? 'No email',
+          'role': data['role']?.toString() ?? 'Unknown',
+          'idNumber': data['idNumber']?.toString() ?? 'No ID',
+          'department': data['department']?.toString() ?? 'No department',
+          'status': data['status']?.toString() ?? 'pending',
+          'createdAt': data['createdAt'],
+        };
+      }).toList();
+
+      // Load approved activities for hours calculation
+      final approvedSessions = await _firestore
+          .collection('work_sessions')
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      print('✅ Approved work sessions: ${approvedSessions.docs.length}');
+      _approvedActivities = approvedSessions.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        print('   ✅ Approved session: ${data['studentEmail']} - ${data['hours']}h');
+        return {
+          'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
+          'hours': (data['hours'] ?? 0.0).toDouble(),
+          'date': data['date']?.toString() ?? 'No date',
+          'studentName': data['studentName']?.toString() ?? 'Unknown',
+          'department': data['department']?.toString() ?? 'Unknown',
+          'supervisorEmail': data['supervisorEmail']?.toString().trim() ?? 'No supervisor',
+        };
+      }).toList();
+
+      print('📊 Summary:');
+      print('- Students (all): ${_studentsEmails.length}');
+      print('- Supervisors (all): ${_supervisorsEmails.length}');
+      print('- Pending users: ${_pendingActivities.length}');
+      print('- Approved sessions: ${_approvedActivities.length}');
+    } catch (e) {
+      print('❌ Error loading email lists: $e');
+      print('Stack trace: ${e.toString()}');
+      // Initialize empty lists to avoid null errors
+      _studentsEmails = [];
+      _supervisorsEmails = [];
+      _pendingActivities = [];
+      _approvedActivities = [];
+    }
+  }
+
   // Show modal for card details - Mobile-friendly HCI
   void _showCardDetails(String cardType) {
     final Map<String, dynamic> cardData = {
@@ -462,12 +470,12 @@ class _AdminDashboardState extends State<AdminDashboard>
 
     switch (cardType) {
       case 'students':
-        cardData['title'] = 'Students';
+        cardData['title'] = 'Students (All)';
         cardData['data'] = _studentsEmails;
         cardData['color'] = Colors.blue;
         break;
       case 'supervisors':
-        cardData['title'] = 'Supervisors';
+        cardData['title'] = 'Supervisors (All)';
         cardData['data'] = _supervisorsEmails;
         cardData['color'] = Colors.purple;
         break;
@@ -742,31 +750,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // Load pending users (users with 'pending' status)
-  Future<List<Map<String, dynamic>>> _loadPendingUsers() async {
-    try {
-      final pendingUsersSnapshot = await _firestore
-          .collection('users')
-          .where('status', isEqualTo: 'pending')
-          .get();
-
-      return pendingUsersSnapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          'email': data['email']?.toString() ?? '',
-          'role': data['role']?.toString() ?? '',
-          'department': data['department']?.toString() ?? '',
-          'idNumber': data['idNumber']?.toString() ?? '',
-          'createdAt': data['createdAt'],
-        };
-      }).toList();
-    } catch (e) {
-      print('Error loading pending users: $e');
-      return [];
-    }
-  }
-
   Future<void> _showLoadingEffect(Future<void> Function() action) async {
     setState(() => isLoading = true);
     try {
@@ -798,8 +781,1168 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Export Functions ---
+  // --- UI ---
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF02AEEE), Color(0xFF02AEEE)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: SafeArea(
+              child: Column(
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: const Text(
+                            "WorkStudy",
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: IconButton(
+                            icon: const Icon(Icons.logout, color: Colors.white),
+                            onPressed: () {
+                              _firebaseService.signOut();
+                              Navigator.pushReplacement(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const LoginPage(),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
+                  // Tabs
+                  Container(
+                    color: Colors.white,
+                    child: TabBar(
+                      controller: _tabController,
+                      labelColor: Colors.blue,
+                      unselectedLabelColor: Colors.black54,
+                      indicatorColor: Colors.blueAccent,
+                      tabs: const [
+                        Tab(icon: Icon(Icons.dashboard), text: "Overview"),
+                        Tab(icon: Icon(Icons.group), text: "Users"),
+                        Tab(icon: Icon(Icons.bar_chart), text: "Reports"),
+                      ],
+                    ),
+                  ),
+
+                  // Tab content
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildOverviewTab(),
+                        _buildUsersTab(),
+                        _buildReportsTab(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Loading overlay
+          if (isLoading)
+            Container(
+              color: Colors.black54.withOpacity(0.5),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 4,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // --- Overview Tab --- FIXED to show ALL users correctly
+  Widget _buildOverviewTab() {
+    final bool hasStats = stats.isNotEmpty && stats["totalStudents"] != null;
+
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      color: Colors.blue,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black12, blurRadius: 4),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "System Overview",
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _lastRefreshTime != null
+                        ? "Data last refreshed: ${DateFormat('MMM dd, h:mm a').format(_lastRefreshTime!)}"
+                        : "Loading data...",
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _refreshData,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text("Refresh Data"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.blue,
+                            elevation: 2,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () {
+                            _showSnack("Tap any card for detailed view",
+                                color: Colors.blue);
+                          },
+                          icon: const Icon(Icons.info_outline, size: 18),
+                          label: const Text("View Details"),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.blue,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Stats Cards - Show loading skeletons if no data
+            if (!hasStats && isLoading)
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.1,
+                children: List.generate(4, (index) => _loadingStatCard()),
+              )
+            else if (hasStats)
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.1,
+                children: [
+                  _statCard(
+                    Icons.people,
+                    "Students",
+                    "${stats["totalStudents"]}",
+                    Colors.blue,
+                    cardType: 'students',
+                  ),
+                  _statCard(
+                    Icons.supervisor_account,
+                    "Supervisors",
+                    "${stats["totalSupervisors"]}",
+                    Colors.purple,
+                    cardType: 'supervisors',
+                  ),
+                  _statCard(
+                    Icons.pending_actions,
+                    "Pending",
+                    "${stats["pendingApprovals"]}",
+                    Colors.orange,
+                    cardType: 'pending',
+                  ),
+                  _statCard(
+                    Icons.timer,
+                    "Hours",
+                    "${stats["totalHoursApproved"].toStringAsFixed(1)}h",
+                    Colors.green,
+                    cardType: 'hours',
+                  ),
+                ],
+              ),
+            
+            // Optional: Display total users count
+            if (hasStats) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+    
+              ),
+            ],
+            
+            const SizedBox(height: 20),
+
+            // Monthly Hours Summary - Updated with real data
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black12, blurRadius: 3),
+                ],
+              ),
+              child: Column(
+                children: [
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Monthly Hours Summary",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.blue,
+                        ),
+                      ),
+                      Icon(Icons.trending_up, color: Colors.blue, size: 20),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _miniStat(
+                          "This Month",
+                          "${reportStats["thisMonthHours"].toStringAsFixed(1)}h",
+                          Colors.blue),
+                      _miniStat(
+                          "Last Month",
+                          "${reportStats["lastMonthHours"].toStringAsFixed(1)}h",
+                          Colors.grey),
+                      _miniStat(
+                          "Avg/Student",
+                          "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)}h",
+                          Colors.green),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        double progress = 0.0;
+                        if (reportStats["lastMonthHours"] > 0) {
+                          progress = (reportStats["thisMonthHours"] /
+                                  reportStats["lastMonthHours"])
+                              .clamp(0.0, 1.0);
+                        } else if (reportStats["thisMonthHours"] > 0) {
+                          progress = 1.0;
+                        }
+
+                        return Stack(
+                          children: [
+                            Container(
+                              width: constraints.maxWidth * progress,
+                              decoration: BoxDecoration(
+                                color: Colors.blue,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Progress indicator: This month vs Last month",
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Users Tab --- UNCHANGED
+  Widget _buildUsersTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _actionButton(
+                  icon: Icons.search,
+                  label: "Search",
+                  color: Colors.black87,
+                  textColor: Colors.white,
+                  iconColor: Colors.white,
+                  onPressed: _showSearchDialog,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _actionButton(
+                  icon: Icons.person_add_alt_1,
+                  label: "Add Student",
+                  color: Colors.white,
+                  textColor: Colors.blue,
+                  iconColor: Colors.blue,
+                  onPressed: () => _addUserDialog("Student"),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _actionButton(
+                  icon: Icons.person_add,
+                  label: "Add Supervisor",
+                  color: Colors.white,
+                  textColor: Colors.blue,
+                  iconColor: Colors.blue,
+                  onPressed: () => _addUserDialog("Supervisor"),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firebaseService.getUsersStream(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                }
+
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final users = snapshot.data!.docs;
+                // Sort users by createdAt timestamp (newest first)
+                final sortedUsers = users
+                  ..sort((a, b) {
+                    final aData = a.data() as Map<String, dynamic>;
+                    final bData = b.data() as Map<String, dynamic>;
+                    final aTime = parseAnyTimestamp(aData['createdAt']);
+                    final bTime = parseAnyTimestamp(bData['createdAt']);
+
+                    if (aTime == null && bTime == null) return 0;
+                    if (aTime == null) return 1;
+                    if (bTime == null) return -1;
+
+                    return bTime
+                        .compareTo(aTime); // Descending order (newest first)
+                  });
+
+                final filteredUsers = sortedUsers.where((user) {
+                  final userData = user.data() as Map<String, dynamic>;
+                  final email =
+                      userData['email']?.toString().toLowerCase() ?? '';
+                  final role = userData['role']?.toString().toLowerCase() ?? '';
+                  final name = userData['name']?.toString().toLowerCase() ?? '';
+                  final idNumber =
+                      userData['idNumber']?.toString().toLowerCase() ?? '';
+
+                  return email.contains(searchQuery) ||
+                      role.contains(searchQuery) ||
+                      name.contains(searchQuery) ||
+                      idNumber.contains(searchQuery);
+                }).toList();
+
+                if (filteredUsers.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'No users found',
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  itemCount: filteredUsers.length,
+                  itemBuilder: (_, i) {
+                    final user = filteredUsers[i];
+                    final userData = user.data() as Map<String, dynamic>;
+                    final userId = user.id;
+                    final email = userData['email'] ?? 'No email';
+                    final role = userData['role'] ?? 'No role';
+                    final status = userData['status'] ?? 'pending';
+                    final name = userData['name'] ?? 'No name';
+                    final idNumber = userData['idNumber'] ?? 'No ID';
+                    final department =
+                        userData['department'] ?? 'No department';
+                    final createdAt = userData['createdAt'];
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      elevation: 2,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Email only - no name displayed
+                            Text(
+                              email,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text('ID: $idNumber • Department: $department'),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text('$role • '),
+                                Text(
+                                  status.toUpperCase(),
+                                  style: TextStyle(
+                                    color: status == 'approved'
+                                        ? Colors.green
+                                        : status == 'pending'
+                                            ? Colors.orange
+                                            : Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Joined: ${formatTimestamp(createdAt)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                _actionIcon(
+                                  icon: Icons.check_circle,
+                                  label: "Approve",
+                                  color: status == 'approved'
+                                      ? Colors.grey
+                                      : Colors.green,
+                                  onPressed: status == 'approved'
+                                      ? null
+                                      : () => _approveUser(userId, email),
+                                ),
+                                _actionIcon(
+                                  icon: Icons.cancel,
+                                  label: "Decline",
+                                  color: status == 'declined'
+                                      ? Colors.grey
+                                      : Colors.red,
+                                  onPressed: status == 'declined'
+                                      ? null
+                                      : () => _declineUser(userId, email),
+                                ),
+                                _actionIcon(
+                                  icon: Icons.edit,
+                                  label: "Edit",
+                                  color: Colors.blue,
+                                  onPressed: () =>
+                                      _editUserDialog(userData, userId),
+                                ),
+                                _actionIcon(
+                                  icon: Icons.delete,
+                                  label: "Delete",
+                                  color: Colors.orange,
+                                  onPressed: () =>
+                                      _confirmDelete(userId, email),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Reports Tab --- UNCHANGED
+  Widget _buildReportsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ListView(
+        children: [_exportCard(), const SizedBox(height: 16), _reportSummary()],
+      ),
+    );
+  }
+
+  // --- Helper Widgets ---
+  Widget _loadingStatCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Loading icon
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.grey.withOpacity(0.3),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Loading value
+            Container(
+              width: 40,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 4),
+            // Loading title
+            Container(
+              width: 60,
+              height: 14,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statCard(IconData icon, String title, String value, Color color,
+      {required String cardType}) {
+    return InkWell(
+      onTap: () => _showCardDetails(cardType),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+          border: Border.all(color: color.withOpacity(0.2), width: 1),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Icon with colored background
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Icon(icon, color: color, size: 20),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Value - larger and bold
+              Text(
+                value,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              // Title
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              // Small touch indicator
+              const SizedBox(height: 4),
+              Icon(
+                Icons.touch_app,
+                size: 10,
+                color: color.withOpacity(0.6),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _miniStat(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            color: Colors.black54,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _actionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required Color textColor,
+    required Color iconColor,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 45,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: ElevatedButton.icon(
+          icon: Icon(icon, size: 18, color: iconColor),
+          label: Text(label, style: TextStyle(fontSize: 14, color: textColor)),
+          onPressed: onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: color,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            elevation: 3,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _actionIcon({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onPressed,
+  }) {
+    return Column(
+      children: [
+        IconButton(
+          icon: Icon(icon, color: color),
+          onPressed: onPressed,
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: color,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- User Management Functions ---
+  void _showSearchDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Search Users"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: "Enter email, name, or role",
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() => searchQuery = controller.text.toLowerCase());
+            },
+            child: const Text("Search"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createUserWithEmailAndPassword(String email, String password,
+      String role, String department, String idNumber) async {
+    try {
+      // Use a different approach - create user through a separate auth instance
+      // This prevents auto-signin
+      final FirebaseAuth tempAuth =
+          FirebaseAuth.instanceFor(app: Firebase.app());
+
+      // Create user without affecting current session
+      final UserCredential userCredential =
+          await tempAuth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      // Store user data in Firestore
+      await _firestore.collection('users').doc(userCredential.user!.uid).set({
+        'email': email,
+        'role': role,
+        'department': department,
+        'idNumber': idNumber,
+        'status': 'approved',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // Sign out from the temp auth instance (doesn't affect main auth)
+      await tempAuth.signOut();
+
+      // Success! Admin stays logged in
+      return;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        throw Exception('This email is already registered');
+      } else if (e.code == 'weak-password') {
+        throw Exception('Password is too weak');
+      } else {
+        throw Exception('Failed to create user: ${e.message}');
+      }
+    } catch (e) {
+      throw Exception('Failed to create user: $e');
+    }
+  }
+
+  void _addUserDialog(String role) {
+    final emailController = TextEditingController();
+    final idNumberController = TextEditingController();
+    final passwordController = TextEditingController();
+    final departmentController = TextEditingController();
+
+    bool obscureTextAddUser = true;
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text("Add $role"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: emailController,
+                    decoration: const InputDecoration(
+                      labelText: "Email",
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: idNumberController,
+                    decoration: const InputDecoration(
+                      labelText: "ID Number",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: departmentController,
+                    decoration: const InputDecoration(
+                      labelText: "Department",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: obscureTextAddUser,
+                    decoration: InputDecoration(
+                      labelText: "Password",
+                      border: const OutlineInputBorder(),
+                      hintText: "Minimum 6 characters",
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscureTextAddUser
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          color: Colors.grey,
+                        ),
+                        onPressed: () {
+                          setDialogState(() {
+                            obscureTextAddUser = !obscureTextAddUser;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final email = emailController.text.trim();
+                  final idNumber = idNumberController.text.trim();
+                  final department = departmentController.text.trim();
+                  final password = passwordController.text.trim();
+
+                  if (!_isValidEmail(email) ||
+                      idNumber.isEmpty ||
+                      department.isEmpty ||
+                      password.length < 6) {
+                    Navigator.pop(context);
+                    _showSnack(
+                        "⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
+                    return;
+                  }
+
+                  Navigator.pop(context);
+                  await _showLoadingEffect(() async {
+                    try {
+                      await _createUserWithEmailAndPassword(
+                          email, password, role, department, idNumber);
+                      _showSnack(
+                        "$role added successfully. They can now login with the provided credentials.",
+                        color: Colors.green,
+                      );
+                      await _loadAllData(); // Refresh all data
+                    } catch (e) {
+                      _showSnack("Error adding user: $e");
+                    }
+                  });
+                },
+                child: const Text("Add"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _approveUser(String userId, String email) async {
+    await _showLoadingEffect(() async {
+      try {
+        await _firebaseService.updateUserStatus(userId, 'approved');
+        _showSnack(
+          "$email approved successfully.",
+          color: Colors.green,
+        );
+        await _loadAllData(); // Refresh all data
+      } catch (e) {
+        _showSnack("Error approving user: $e");
+      }
+    });
+  }
+
+  void _declineUser(String userId, String email) async {
+    await _showLoadingEffect(() async {
+      try {
+        await _firebaseService.updateUserStatus(userId, 'declined');
+        _showSnack(
+          "$email declined.",
+          color: Colors.red,
+        );
+        await _loadAllData(); // Refresh all data
+      } catch (e) {
+        _showSnack("Error declining user: $e");
+      }
+    });
+  }
+
+  void _editUserDialog(Map<String, dynamic> user, String userId) {
+    final emailController = TextEditingController(text: user["email"] ?? '');
+    final idNumberController =
+        TextEditingController(text: user["idNumber"] ?? '');
+    final departmentController =
+        TextEditingController(text: user["department"] ?? '');
+
+    // Get the role and ensure it's valid
+    String role = user["role"]?.toString() ?? 'Student';
+
+    // Define valid roles
+    final List<String> validRoles = ["Student", "Supervisor"];
+
+    // If the current role isn't valid, default to 'Student'
+    if (!validRoles.contains(role)) {
+      role = 'Student';
+    }
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text("Edit User"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: emailController,
+                    decoration: const InputDecoration(
+                      labelText: "Email",
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: idNumberController,
+                    decoration: const InputDecoration(
+                      labelText: "ID Number",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: departmentController,
+                    decoration: const InputDecoration(
+                      labelText: "Department",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: role,
+                    items: validRoles.map((String role) {
+                      return DropdownMenuItem<String>(
+                        value: role,
+                        child: Text(role),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          role = newValue;
+                        });
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      labelText: "Role",
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please select a role';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final email = emailController.text.trim();
+                  final idNumber = idNumberController.text.trim();
+                  final department = departmentController.text.trim();
+
+                  if (!_isValidEmail(email) ||
+                      idNumber.isEmpty ||
+                      department.isEmpty) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please fill all fields correctly.");
+                    return;
+                  }
+
+                  // Ensure role is valid
+                  if (!validRoles.contains(role)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please select a valid role.");
+                    return;
+                  }
+
+                  Navigator.pop(context);
+                  await _showLoadingEffect(() async {
+                    try {
+                      await _firebaseService.updateUser(
+                          userId,
+                          email, // Changed from user["name"] ?? ''
+                          role,
+                          department,
+                          idNumber);
+                      _showSnack(
+                        "✅ User updated successfully.",
+                        color: Colors.green,
+                      );
+                      await _loadAllData(); // Refresh all data
+                    } catch (e) {
+                      _showSnack("Error updating user: $e");
+                    }
+                  });
+                },
+                child: const Text("Save"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _confirmDelete(String userId, String email) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete User"),
+        content: Text("Are you sure you want to remove $email?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(context);
+              await _showLoadingEffect(() async {
+                try {
+                  await _firebaseService.deleteUser(userId);
+                  _showSnack(
+                    "$email removed successfully.",
+                    color: Colors.green,
+                  );
+                  await _loadAllData(); // Refresh all data
+                } catch (e) {
+                  _showSnack("Error deleting user: $e");
+                }
+              });
+            },
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Export Functions ---
   Future<List<Map<String, dynamic>>> _fetchReportData() async {
     try {
       // Fetch users data - order by createdAt descending (newest first)
@@ -1026,1156 +2169,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       }
     });
   }
-  // --- User Management Functions ---
-
-  Future<void> _createUserWithEmailAndPassword(String email, String password,
-      String role, String department, String idNumber) async {
-    try {
-      // Use a different approach - create user through a separate auth instance
-      // This prevents auto-signin
-      final FirebaseAuth tempAuth =
-          FirebaseAuth.instanceFor(app: Firebase.app());
-
-      // Create user without affecting current session
-      final UserCredential userCredential =
-          await tempAuth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
-      // Store user data in Firestore
-      await _firestore.collection('users').doc(userCredential.user!.uid).set({
-        'email': email,
-        'role': role,
-        'department': department,
-        'idNumber': idNumber,
-        'status': 'approved',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // Sign out from the temp auth instance (doesn't affect main auth)
-      await tempAuth.signOut();
-
-      // Success! Admin stays logged in
-      return;
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'email-already-in-use') {
-        throw Exception('This email is already registered');
-      } else if (e.code == 'weak-password') {
-        throw Exception('Password is too weak');
-      } else {
-        throw Exception('Failed to create user: ${e.message}');
-      }
-    } catch (e) {
-      throw Exception('Failed to create user: $e');
-    }
-  }
-
-  void _confirmDelete(String userId, String email) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Delete User"),
-        content: Text("Are you sure you want to remove $email?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              Navigator.pop(context);
-              await _showLoadingEffect(() async {
-                try {
-                  await _firebaseService.deleteUser(userId);
-                  _showSnack(
-                    "$email removed successfully.",
-                    color: Colors.green,
-                  );
-                  await _loadAllData(); // Refresh all data
-                } catch (e) {
-                  _showSnack("Error deleting user: $e");
-                }
-              });
-            },
-            child: const Text("Delete"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _addUserDialog(String role) {
-    final emailController = TextEditingController();
-    final idNumberController = TextEditingController();
-    final passwordController = TextEditingController();
-    final departmentController = TextEditingController();
-
-    bool obscureTextAddUser = true;
-
-    showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text("Add $role"),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: emailController,
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: idNumberController,
-                    decoration: const InputDecoration(
-                      labelText: "ID Number",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: departmentController,
-                    decoration: const InputDecoration(
-                      labelText: "Department",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: passwordController,
-                    obscureText: obscureTextAddUser,
-                    decoration: InputDecoration(
-                      labelText: "Password",
-                      border: const OutlineInputBorder(),
-                      hintText: "Minimum 6 characters",
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          obscureTextAddUser
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                          color: Colors.grey,
-                        ),
-                        onPressed: () {
-                          setDialogState(() {
-                            obscureTextAddUser = !obscureTextAddUser;
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  final email = emailController.text.trim();
-                  final idNumber = idNumberController.text.trim();
-                  final department = departmentController.text.trim();
-                  final password = passwordController.text.trim();
-
-                  if (!_isValidEmail(email) ||
-                      idNumber.isEmpty ||
-                      department.isEmpty ||
-                      password.length < 6) {
-                    Navigator.pop(context);
-                    _showSnack(
-                        "⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
-                    return;
-                  }
-
-                  Navigator.pop(context);
-                  await _showLoadingEffect(() async {
-                    try {
-                      await _createUserWithEmailAndPassword(
-                          email, password, role, department, idNumber);
-                      _showSnack(
-                        "$role added successfully. They can now login with the provided credentials.",
-                        color: Colors.green,
-                      );
-                      await _loadAllData(); // Refresh all data
-                    } catch (e) {
-                      _showSnack("Error adding user: $e");
-                    }
-                  });
-                },
-                child: const Text("Add"),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  void _editUserDialog(Map<String, dynamic> user, String userId) {
-    final emailController = TextEditingController(text: user["email"] ?? '');
-    final idNumberController =
-        TextEditingController(text: user["idNumber"] ?? '');
-    final departmentController =
-        TextEditingController(text: user["department"] ?? '');
-
-    // Get the role and ensure it's valid
-    String role = user["role"]?.toString() ?? 'Student';
-
-    // Define valid roles
-    final List<String> validRoles = ["Student", "Supervisor"];
-
-    // If the current role isn't valid, default to 'Student'
-    if (!validRoles.contains(role)) {
-      role = 'Student';
-    }
-
-    showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: const Text("Edit User"),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: emailController,
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: idNumberController,
-                    decoration: const InputDecoration(
-                      labelText: "ID Number",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: departmentController,
-                    decoration: const InputDecoration(
-                      labelText: "Department",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: role,
-                    items: validRoles.map((String role) {
-                      return DropdownMenuItem<String>(
-                        value: role,
-                        child: Text(role),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        setState(() {
-                          role = newValue;
-                        });
-                      }
-                    },
-                    decoration: const InputDecoration(
-                      labelText: "Role",
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please select a role';
-                      }
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  final email = emailController.text.trim();
-                  final idNumber = idNumberController.text.trim();
-                  final department = departmentController.text.trim();
-
-                  if (!_isValidEmail(email) ||
-                      idNumber.isEmpty ||
-                      department.isEmpty) {
-                    Navigator.pop(context);
-                    _showSnack("⚠️ Please fill all fields correctly.");
-                    return;
-                  }
-
-                  // Ensure role is valid
-                  if (!validRoles.contains(role)) {
-                    Navigator.pop(context);
-                    _showSnack("⚠️ Please select a valid role.");
-                    return;
-                  }
-
-                  Navigator.pop(context);
-                  await _showLoadingEffect(() async {
-                    try {
-                      await _firebaseService.updateUser(
-                          userId,
-                          email, // Changed from user["name"] ?? ''
-                          role,
-                          department,
-                          idNumber);
-                      _showSnack(
-                        "✅ User updated successfully.",
-                        color: Colors.green,
-                      );
-                      await _loadAllData(); // Refresh all data
-                    } catch (e) {
-                      _showSnack("Error updating user: $e");
-                    }
-                  });
-                },
-                child: const Text("Save"),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  void _showSearchDialog() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Search Users"),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: "Enter email, name, or role",
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() => searchQuery = controller.text.toLowerCase());
-            },
-            child: const Text("Search"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _approveUser(String userId, String email) async {
-    await _showLoadingEffect(() async {
-      try {
-        await _firebaseService.updateUserStatus(userId, 'approved');
-        _showSnack(
-          "$email approved successfully.",
-          color: Colors.green,
-        );
-        await _loadAllData(); // Refresh all data
-      } catch (e) {
-        _showSnack("Error approving user: $e");
-      }
-    });
-  }
-
-  void _declineUser(String userId, String email) async {
-    await _showLoadingEffect(() async {
-      try {
-        await _firebaseService.updateUserStatus(userId, 'declined');
-        _showSnack(
-          "$email declined.",
-          color: Colors.red,
-        );
-        await _loadAllData(); // Refresh all data
-      } catch (e) {
-        _showSnack("Error declining user: $e");
-      }
-    });
-  }
-
-  // --- UI ---
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF02AEEE), Color(0xFF02AEEE)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: SafeArea(
-              child: Column(
-                children: [
-                  // Header
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        FadeTransition(
-                          opacity: _fadeAnimation,
-                          child: const Text(
-                            "WorkStudy",
-                            style: TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: IconButton(
-                            icon: const Icon(Icons.logout, color: Colors.white),
-                            onPressed: () {
-                              _firebaseService.signOut();
-                              Navigator.pushReplacement(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const LoginPage(),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Tabs
-                  Container(
-                    color: Colors.white,
-                    child: TabBar(
-                      controller: _tabController,
-                      labelColor: Colors.blue,
-                      unselectedLabelColor: Colors.black54,
-                      indicatorColor: Colors.blueAccent,
-                      tabs: const [
-                        Tab(icon: Icon(Icons.dashboard), text: "Overview"),
-                        Tab(icon: Icon(Icons.group), text: "Users"),
-                        Tab(icon: Icon(Icons.bar_chart), text: "Reports"),
-                      ],
-                    ),
-                  ),
-
-                  // Tab content
-                  Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildOverviewTab(),
-                        _buildUsersTab(),
-                        _buildReportsTab(),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Loading overlay
-          if (isLoading)
-            Container(
-              color: Colors.black54.withOpacity(0.5),
-              child: const Center(
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 4,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // --- Overview Tab --- UPDATED with correct data fetching
-  Widget _buildOverviewTab() {
-    final bool hasStats = stats.isNotEmpty && stats["totalStudents"] != null;
-
-    return RefreshIndicator(
-      onRefresh: _refreshData,
-      color: Colors.blue,
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black12, blurRadius: 4),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "System Overview",
-                    style: TextStyle(
-                      color: Colors.blue,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _lastRefreshTime != null
-                        ? "Data last refreshed: ${DateFormat('MMM dd, h:mm a').format(_lastRefreshTime!)}"
-                        : "Loading data...",
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black54,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _refreshData,
-                          icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text("Refresh Data"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.blue,
-                            elevation: 2,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: () {
-                            _showSnack("Tap any card for detailed view",
-                                color: Colors.blue);
-                          },
-                          icon: const Icon(Icons.info_outline, size: 18),
-                          label: const Text("View Details"),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.blue,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Stats Cards - Show loading skeletons if no data
-            if (!hasStats && isLoading)
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.1,
-                children: List.generate(4, (index) => _loadingStatCard()),
-              )
-            else if (hasStats)
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.1,
-                children: [
-                  _statCard(
-                    Icons.people,
-                    "Students",
-                    "${stats["totalStudents"]}",
-                    Colors.blue,
-                    cardType: 'students',
-                  ),
-                  _statCard(
-                    Icons.supervisor_account,
-                    "Supervisors",
-                    "${stats["totalSupervisors"]}",
-                    Colors.purple,
-                    cardType: 'supervisors',
-                  ),
-                  _statCard(
-                    Icons.pending_actions,
-                    "Pending",
-                    "${stats["pendingApprovals"]}",
-                    Colors.orange,
-                    cardType: 'pending',
-                  ),
-                  _statCard(
-                    Icons.timer,
-                    "Hours",
-                    "${stats["totalHoursApproved"].toStringAsFixed(1)}h",
-                    Colors.green,
-                    cardType: 'hours',
-                  ),
-                ],
-              ),
-            const SizedBox(height: 20),
-
-            // Monthly Hours Summary - Updated with real data
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black12, blurRadius: 3),
-                ],
-              ),
-              child: Column(
-                children: [
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        "Monthly Hours Summary",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: Colors.blue,
-                        ),
-                      ),
-                      Icon(Icons.trending_up, color: Colors.blue, size: 20),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _miniStat(
-                          "This Month",
-                          "${reportStats["thisMonthHours"].toStringAsFixed(1)}h",
-                          Colors.blue),
-                      _miniStat(
-                          "Last Month",
-                          "${reportStats["lastMonthHours"].toStringAsFixed(1)}h",
-                          Colors.grey),
-                      _miniStat(
-                          "Avg/Student",
-                          "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)}h",
-                          Colors.green),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        double progress = 0.0;
-                        if (reportStats["lastMonthHours"] > 0) {
-                          progress = (reportStats["thisMonthHours"] /
-                                  reportStats["lastMonthHours"])
-                              .clamp(0.0, 1.0);
-                        } else if (reportStats["thisMonthHours"] > 0) {
-                          progress = 1.0;
-                        }
-
-                        return Stack(
-                          children: [
-                            Container(
-                              width: constraints.maxWidth * progress,
-                              decoration: BoxDecoration(
-                                color: Colors.blue,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Progress indicator: This month vs Last month",
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // REMOVED the duplicate "All clear! No pending approvals" section
-            // This was the second attached image part you wanted removed
-          ],
-        ),
-      ),
-    );
-  }
-
-  // --- Users Tab --- UNCHANGED
-  Widget _buildUsersTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _actionButton(
-                  icon: Icons.search,
-                  label: "Search",
-                  color: Colors.black87,
-                  textColor: Colors.white,
-                  iconColor: Colors.white,
-                  onPressed: _showSearchDialog,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _actionButton(
-                  icon: Icons.person_add_alt_1,
-                  label: "Add Student",
-                  color: Colors.white,
-                  textColor: Colors.blue,
-                  iconColor: Colors.blue,
-                  onPressed: () => _addUserDialog("Student"),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _actionButton(
-                  icon: Icons.person_add,
-                  label: "Add Supervisor",
-                  color: Colors.white,
-                  textColor: Colors.blue,
-                  iconColor: Colors.blue,
-                  onPressed: () => _addUserDialog("Supervisor"),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _firebaseService.getUsersStream(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final users = snapshot.data!.docs;
-                // Sort users by createdAt timestamp (newest first)
-                final sortedUsers = users
-                  ..sort((a, b) {
-                    final aData = a.data() as Map<String, dynamic>;
-                    final bData = b.data() as Map<String, dynamic>;
-                    final aTime = parseAnyTimestamp(aData['createdAt']);
-                    final bTime = parseAnyTimestamp(bData['createdAt']);
-
-                    if (aTime == null && bTime == null) return 0;
-                    if (aTime == null) return 1;
-                    if (bTime == null) return -1;
-
-                    return bTime
-                        .compareTo(aTime); // Descending order (newest first)
-                  });
-
-                final filteredUsers = sortedUsers.where((user) {
-                  final userData = user.data() as Map<String, dynamic>;
-                  final email =
-                      userData['email']?.toString().toLowerCase() ?? '';
-                  final role = userData['role']?.toString().toLowerCase() ?? '';
-                  final name = userData['name']?.toString().toLowerCase() ?? '';
-                  final idNumber =
-                      userData['idNumber']?.toString().toLowerCase() ?? '';
-
-                  return email.contains(searchQuery) ||
-                      role.contains(searchQuery) ||
-                      name.contains(searchQuery) ||
-                      idNumber.contains(searchQuery);
-                }).toList();
-
-                if (filteredUsers.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'No users found',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  itemCount: filteredUsers.length,
-                  itemBuilder: (_, i) {
-                    final user = filteredUsers[i];
-                    final userData = user.data() as Map<String, dynamic>;
-                    final userId = user.id;
-                    final email = userData['email'] ?? 'No email';
-                    final role = userData['role'] ?? 'No role';
-                    final status = userData['status'] ?? 'pending';
-                    final name = userData['name'] ?? 'No name';
-                    final idNumber = userData['idNumber'] ?? 'No ID';
-                    final department =
-                        userData['department'] ?? 'No department';
-                    final createdAt = userData['createdAt'];
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      elevation: 2,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Email only - no name displayed
-                            Text(
-                              email,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text('ID: $idNumber • Department: $department'),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text('$role • '),
-                                Text(
-                                  status.toUpperCase(),
-                                  style: TextStyle(
-                                    color: status == 'approved'
-                                        ? Colors.green
-                                        : status == 'pending'
-                                            ? Colors.orange
-                                            : Colors.red,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Joined: ${formatTimestamp(createdAt)}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                _actionIcon(
-                                  icon: Icons.check_circle,
-                                  label: "Approve",
-                                  color: status == 'approved'
-                                      ? Colors.grey
-                                      : Colors.green,
-                                  onPressed: status == 'approved'
-                                      ? null
-                                      : () => _approveUser(userId, email),
-                                ),
-                                _actionIcon(
-                                  icon: Icons.cancel,
-                                  label: "Decline",
-                                  color: status == 'declined'
-                                      ? Colors.grey
-                                      : Colors.red,
-                                  onPressed: status == 'declined'
-                                      ? null
-                                      : () => _declineUser(userId, email),
-                                ),
-                                _actionIcon(
-                                  icon: Icons.edit,
-                                  label: "Edit",
-                                  color: Colors.blue,
-                                  onPressed: () =>
-                                      _editUserDialog(userData, userId),
-                                ),
-                                _actionIcon(
-                                  icon: Icons.delete,
-                                  label: "Delete",
-                                  color: Colors.orange,
-                                  onPressed: () =>
-                                      _confirmDelete(userId, email),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- Reports Tab --- UNCHANGED
-  Widget _buildReportsTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: ListView(
-        children: [_exportCard(), const SizedBox(height: 16), _reportSummary()],
-      ),
-    );
-  }
-
-  // --- Helper Widgets --- UNCHANGED
-  Widget _loadingStatCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Loading icon
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.grey.withOpacity(0.3),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Loading value
-            Container(
-              width: 40,
-              height: 20,
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(height: 4),
-            // Loading title
-            Container(
-              width: 60,
-              height: 14,
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _statCard(IconData icon, String title, String value, Color color,
-      {required String cardType}) {
-    return InkWell(
-      onTap: () => _showCardDetails(cardType),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-          border: Border.all(color: color.withOpacity(0.2), width: 1),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Icon with colored background
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Icon(icon, color: color, size: 20),
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Value - larger and bold
-              Text(
-                value,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              // Title
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              // Small touch indicator
-              const SizedBox(height: 4),
-              Icon(
-                Icons.touch_app,
-                size: 10,
-                color: color.withOpacity(0.6),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _miniStat(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: Colors.black54,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _actionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required Color textColor,
-    required Color iconColor,
-    required VoidCallback onPressed,
-  }) {
-    return SizedBox(
-      height: 45,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: ElevatedButton.icon(
-          icon: Icon(icon, size: 18, color: iconColor),
-          label: Text(label, style: TextStyle(fontSize: 14, color: textColor)),
-          onPressed: onPressed,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: color,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            elevation: 3,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _actionIcon({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback? onPressed,
-  }) {
-    return Column(
-      children: [
-        IconButton(
-          icon: Icon(icon, color: color),
-          onPressed: onPressed,
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: color,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
 
   Future<void> _exportExcel(String format) async {
     await _showLoadingEffect(() async {
@@ -2304,6 +2297,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 "${stats["totalHoursApproved"].toStringAsFixed(1)} hrs"),
             _summaryRow("Avg Hours/Student (This Month)",
                 "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)} hrs"),
+            
           ],
         ),
       ),
@@ -2323,7 +2317,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 }
-
 
 extension on excel.Sheet {
   void setColAutoFit(int i) {}
