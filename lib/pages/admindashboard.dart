@@ -288,6 +288,8 @@ class _AdminDashboardState extends State<AdminDashboard>
 
       double thisMonthHours = 0.0;
       double lastMonthHours = 0.0;
+      int thisMonthCount = 0;
+      int lastMonthCount = 0;
 
       for (var session in allApprovedSessions.docs) {
         final data = session.data() as Map<String, dynamic>;
@@ -308,6 +310,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           // Check if this month
           if (submittedAt.year == now.year && submittedAt.month == now.month) {
             thisMonthHours += hourValue;
+            thisMonthCount++;
             print(
                 '   📅 This month session: $studentEmail - $hourValue on ${DateFormat('yyyy-MM-dd').format(submittedAt)}');
           }
@@ -316,6 +319,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           if (submittedAt.year == lastMonthStart.year &&
               submittedAt.month == lastMonthStart.month) {
             lastMonthHours += hourValue;
+            lastMonthCount++;
             print(
                 '   📅 Last month session: $studentEmail - $hourValue on ${DateFormat('yyyy-MM-dd').format(submittedAt)}');
           }
@@ -337,8 +341,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           : 0.0;
 
       print('📊 Calculated report stats:');
-      print('- This month hours: $thisMonthHours');
-      print('- Last month hours: $lastMonthHours');
+      print('- This month hours: $thisMonthHours (from $thisMonthCount sessions)');
+      print('- Last month hours: $lastMonthHours (from $lastMonthCount sessions)');
       print('- Active students: $totalActiveStudents');
       print('- Avg hours/student: $avgHours');
 
@@ -347,6 +351,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           "thisMonthHours": thisMonthHours,
           "lastMonthHours": lastMonthHours,
           "avgHoursPerStudent": avgHours,
+          "thisMonthCount": thisMonthCount,
+          "lastMonthCount": lastMonthCount,
         };
       });
     } catch (e) {
@@ -358,6 +364,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           "thisMonthHours": 0.0,
           "lastMonthHours": 0.0,
           "avgHoursPerStudent": 0.0,
+          "thisMonthCount": 0,
+          "lastMonthCount": 0,
         };
       });
     }
@@ -885,7 +893,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Overview Tab --- FIXED to show ALL users correctly
+  // --- Overview Tab --- FIXED to show correct hours data
   Widget _buildOverviewTab() {
     final bool hasStats = stats.isNotEmpty && stats["totalStudents"] != null;
 
@@ -897,6 +905,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // System Overview Header
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
@@ -965,7 +974,7 @@ class _AdminDashboardState extends State<AdminDashboard>
             ),
             const SizedBox(height: 20),
 
-            // Stats Cards - Show loading skeletons if no data
+            // Stats Cards
             if (!hasStats && isLoading)
               GridView.count(
                 shrinkWrap: true,
@@ -1009,29 +1018,16 @@ class _AdminDashboardState extends State<AdminDashboard>
                   _statCard(
                     Icons.timer,
                     "Hours",
-                    "${stats["totalHoursApproved"].toStringAsFixed(1)}h",
+                    "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(1)}h",
                     Colors.green,
                     cardType: 'hours',
                   ),
                 ],
               ),
             
-            // Optional: Display total users count
-            if (hasStats) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-    
-              ),
-            ],
-            
             const SizedBox(height: 20),
 
-            // Monthly Hours Summary - Updated with real data
+            // Monthly Hours Summary - FIXED: Now shows correct hours data
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1057,64 +1053,172 @@ class _AdminDashboardState extends State<AdminDashboard>
                       Icon(Icons.trending_up, color: Colors.blue, size: 20),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
+                  
+                  // Hours Summary Row - FIXED: Using correct data with null checks
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _miniStat(
-                          "This Month",
-                          "${reportStats["thisMonthHours"].toStringAsFixed(1)}h",
-                          Colors.blue),
-                      _miniStat(
-                          "Last Month",
-                          "${reportStats["lastMonthHours"].toStringAsFixed(1)}h",
-                          Colors.grey),
-                      _miniStat(
-                          "Avg/Student",
-                          "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)}h",
-                          Colors.green),
+                      _buildHourMetric(
+                        "This Month",
+                        reportStats["thisMonthHours"] != null 
+                            ? "${(reportStats["thisMonthHours"] as double).toStringAsFixed(1)}h"
+                            : "0.0h",
+                        Colors.blue,
+                        Icons.calendar_today,
+                      ),
+                      Container(
+                        height: 30,
+                        width: 1,
+                        color: Colors.grey[300],
+                      ),
+                      _buildHourMetric(
+                        "Last Month",
+                        reportStats["lastMonthHours"] != null
+                            ? "${(reportStats["lastMonthHours"] as double).toStringAsFixed(1)}h"
+                            : "0.0h",
+                        Colors.grey,
+                        Icons.calendar_view_month,
+                      ),
+                      Container(
+                        height: 30,
+                        width: 1,
+                        color: Colors.grey[300],
+                      ),
+                      _buildHourMetric(
+                        "Avg/Student",
+                        reportStats["avgHoursPerStudent"] != null
+                            ? "${(reportStats["avgHoursPerStudent"] as double).toStringAsFixed(1)}h"
+                            : "0.0h",
+                        Colors.green,
+                        Icons.people_outline,
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(2),
+                  
+                  const SizedBox(height: 20),
+                  
+                  // Progress Bar - Shows comparison between this month and last month
+                  if ((reportStats["lastMonthHours"] ?? 0.0) > 0 || 
+                      (reportStats["thisMonthHours"] ?? 0.0) > 0) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                "Progress vs Last Month",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                              Text(
+                                _calculatePercentageChange(
+                                  reportStats["lastMonthHours"] ?? 0.0,
+                                  reportStats["thisMonthHours"] ?? 0.0,
+                                ),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: _getChangeColor(
+                                    reportStats["lastMonthHours"] ?? 0.0,
+                                    reportStats["thisMonthHours"] ?? 0.0,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: _calculateProgress(
+                                reportStats["lastMonthHours"] ?? 0.0,
+                                reportStats["thisMonthHours"] ?? 0.0,
+                              ),
+                              backgroundColor: Colors.grey[200],
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                _getProgressColor(
+                                  reportStats["lastMonthHours"] ?? 0.0,
+                                  reportStats["thisMonthHours"] ?? 0.0,
+                                ),
+                              ),
+                              minHeight: 8,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        double progress = 0.0;
-                        if (reportStats["lastMonthHours"] > 0) {
-                          progress = (reportStats["thisMonthHours"] /
-                                  reportStats["lastMonthHours"])
-                              .clamp(0.0, 1.0);
-                        } else if (reportStats["thisMonthHours"] > 0) {
-                          progress = 1.0;
-                        }
-
-                        return Stack(
+                  ] else ...[
+                    // Show empty state when no hours data
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: Column(
                           children: [
-                            Container(
-                              width: constraints.maxWidth * progress,
-                              decoration: BoxDecoration(
-                                color: Colors.blue,
-                                borderRadius: BorderRadius.circular(2),
+                            Icon(
+                              Icons.info_outline,
+                              size: 32,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              "No hours data available",
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
                               ),
                             ),
+                            const SizedBox(height: 4),
+                            Text(
+                              "Hours will appear when work sessions are approved",
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[500],
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
                           ],
-                        );
-                      },
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Progress indicator: This month vs Last month",
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey[600],
+                  ],
+                  
+                  // Debug info - You can remove this in production
+                  if (stats["totalHoursApproved"] != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            "Total Approved Hours (All Time): ${(stats["totalHoursApproved"] as double).toStringAsFixed(1)}h",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "This Month: ${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(1)}h",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -1122,6 +1226,80 @@ class _AdminDashboardState extends State<AdminDashboard>
         ),
       ),
     );
+  }
+
+  // Helper method to build hour metrics with icons
+  Widget _buildHourMetric(String label, String value, Color color, IconData icon) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            icon,
+            color: color,
+            size: 16,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Helper method to calculate progress percentage
+  double _calculateProgress(double lastMonth, double thisMonth) {
+    if (lastMonth <= 0 && thisMonth <= 0) return 0.0;
+    if (lastMonth <= 0) return 1.0; // If no hours last month, show full progress if this month has hours
+    if (thisMonth <= 0) return 0.0;
+    
+    // Cap at 1.0 (100%) for the progress bar
+    return (thisMonth / lastMonth).clamp(0.0, 1.0);
+  }
+
+  // Helper method to get progress bar color
+  Color _getProgressColor(double lastMonth, double thisMonth) {
+    if (lastMonth <= 0 && thisMonth > 0) return Colors.green;
+    if (thisMonth > lastMonth) return Colors.green;
+    if (thisMonth < lastMonth) return Colors.orange;
+    return Colors.blue;
+  }
+
+  // Helper method to calculate percentage change
+  String _calculatePercentageChange(double lastMonth, double thisMonth) {
+    if (lastMonth <= 0 && thisMonth > 0) return "+100%";
+    if (lastMonth <= 0) return "0%";
+    if (thisMonth <= 0) return "-100%";
+    
+    double change = ((thisMonth - lastMonth) / lastMonth) * 100;
+    String sign = change > 0 ? "+" : "";
+    return "$sign${change.toStringAsFixed(1)}%";
+  }
+
+  // Helper method to get change color
+  Color _getChangeColor(double lastMonth, double thisMonth) {
+    if (lastMonth <= 0 && thisMonth > 0) return Colors.green;
+    if (thisMonth > lastMonth) return Colors.green;
+    if (thisMonth < lastMonth) return Colors.red;
+    return Colors.grey;
   }
 
   // --- Users Tab --- 
@@ -2287,17 +2465,16 @@ class _AdminDashboardState extends State<AdminDashboard>
             ),
             const SizedBox(height: 12),
             _summaryRow("This Month",
-                "${reportStats["thisMonthHours"].toStringAsFixed(1)} hours"),
+                "${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(1)} hours"),
             _summaryRow("Last Month",
-                "${reportStats["lastMonthHours"].toStringAsFixed(1)} hours"),
+                "${(reportStats["lastMonthHours"] ?? 0.0).toStringAsFixed(1)} hours"),
             _summaryRow("Total Students", stats["totalStudents"].toString()),
             _summaryRow(
                 "Pending Approvals", stats["pendingApprovals"].toString()),
             _summaryRow("Total Hours Approved",
-                "${stats["totalHoursApproved"].toStringAsFixed(1)} hrs"),
+                "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(1)} hrs"),
             _summaryRow("Avg Hours/Student (This Month)",
-                "${reportStats["avgHoursPerStudent"].toStringAsFixed(1)} hrs"),
-            
+                "${(reportStats["avgHoursPerStudent"] ?? 0.0).toStringAsFixed(1)} hrs"),
           ],
         ),
       ),
