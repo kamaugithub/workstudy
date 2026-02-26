@@ -114,6 +114,90 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
+  // --- COMPREHENSIVE DEBUG METHOD TO CHECK WORK SESSIONS ---
+  Future<void> _debugCheckWorkSessions() async {
+    setState(() => isLoading = true);
+    
+    print('\n🔴🔴🔴 DEBUG: Checking all work sessions... 🔴🔴🔴');
+    
+    try {
+      print('\n📊 FETCHING ALL WORK SESSIONS:');
+      final allSessions = await _firestore.collection('work_sessions').get();
+      print('Total documents in work_sessions: ${allSessions.docs.length}');
+      
+      if (allSessions.docs.isNotEmpty) {
+        print('\n📋 DETAILED SESSION INFORMATION:');
+        for (var i = 0; i < allSessions.docs.length; i++) {
+          final doc = allSessions.docs[i];
+          final data = doc.data();
+          print('\n--- Session ${i + 1} (ID: ${doc.id}) ---');
+          data.forEach((key, value) {
+            print('   $key: $value (${value.runtimeType})');
+          });
+        }
+        
+        // Specifically query for "Approved" status (capital A)
+        print('\n✅ CHECKING SESSIONS WITH STATUS "Approved":');
+        final approvedSessions = await _firestore
+            .collection('work_sessions')
+            .where('status', isEqualTo: 'Approved')
+            .get();
+        
+        print('Found ${approvedSessions.docs.length} sessions with status "Approved"');
+        
+        double total = 0.0;
+        for (var session in approvedSessions.docs) {
+          final data = session.data();
+          final hours = data['hours'];
+          double hourValue = 0.0;
+          if (hours != null) {
+            if (hours is int) hourValue = hours.toDouble();
+            else if (hours is double) hourValue = hours;
+            else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
+          }
+          total += hourValue;
+          print('   - Session ${session.id}: $hourValue hours (Student: ${data['studentEmail']})');
+        }
+        print('💰 TOTAL APPROVED HOURS: $total');
+        
+        _showSnack('Debug complete! Found ${approvedSessions.docs.length} approved sessions with $total hours', 
+            color: approvedSessions.docs.isNotEmpty ? Colors.green : Colors.orange);
+      }
+      
+    } catch (e) {
+      print('❌ Error in debug check: $e');
+      _showSnack('Debug error: $e', color: Colors.red);
+    }
+    
+    print('\n🔴🔴🔴 DEBUG COMPLETE =====\n');
+    setState(() => isLoading = false);
+  }
+
+  // Helper method to extract hours from various possible field names
+  double _extractHours(Map<String, dynamic> data) {
+    // Try different possible field names
+    List<String> possibleFields = ['hours', 'hour', 'totalHours', 'approvedHours', 'workHours', 'duration'];
+    
+    for (var field in possibleFields) {
+      if (data.containsKey(field)) {
+        final value = data[field];
+        if (value != null) {
+          if (value is int) {
+            return value.toDouble();
+          } else if (value is double) {
+            return value;
+          } else if (value is String) {
+            final parsed = double.tryParse(value);
+            if (parsed != null) return parsed;
+          } else if (value is num) {
+            return value.toDouble();
+          }
+        }
+      }
+    }
+    return 0.0;
+  }
+
   // --- REFRESH DATA WITH DEBOUNCING ---
   Future<void> _refreshData() async {
     if (_isRefreshing) return;
@@ -131,7 +215,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       if (timestamp is Timestamp) {
         return timestamp.toDate();
       } else if (timestamp is int) {
-        // Handle milliseconds timestamp
         return DateTime.fromMillisecondsSinceEpoch(timestamp);
       } else if (timestamp is String) {
         return DateTime.tryParse(timestamp);
@@ -144,11 +227,10 @@ class _AdminDashboardState extends State<AdminDashboard>
     return null;
   }
 
-  /// Formats timestamp to readable format: "Monday, November 18, 2024 4:35:48 PM"
+  /// Formats timestamp to readable format
   String formatTimestamp(dynamic timestamp) {
     final dateTime = parseAnyTimestamp(timestamp);
     if (dateTime == null) return 'Date not available';
-
     return DateFormat('EEEE, MMMM d, yyyy h:mm:ss a').format(dateTime);
   }
 
@@ -156,11 +238,10 @@ class _AdminDashboardState extends State<AdminDashboard>
   String formatTimestampForExport(dynamic timestamp) {
     final dateTime = parseAnyTimestamp(timestamp);
     if (dateTime == null) return 'N/A';
-
     return DateFormat('yyyy-MM-dd HH:mm:ss').format(dateTime);
   }
 
-  // Load dashboard statistics - FIXED to show ALL users correctly
+  // Load dashboard statistics - FIXED to use correct "Approved" status
   Future<void> _loadDashboardStats() async {
     try {
       print('📊 Loading dashboard stats...');
@@ -169,76 +250,65 @@ class _AdminDashboardState extends State<AdminDashboard>
       final allUsers = await _firestore.collection('users').get();
       print('👥 Total users in database: ${allUsers.docs.length}');
 
-      // Print ALL users to see what's actually in the database
-      for (var doc in allUsers.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        print(
-            '   📍 User: ${data['email']} | Role: ${data['role']} | Status: ${data['status']}');
-      }
-
       int totalStudents = 0;
       int totalSupervisors = 0;
       int pendingApprovals = 0;
-      int otherUsers = 0; // Track users with other roles
+      int otherUsers = 0;
 
       for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
         final role = data['role']?.toString() ?? '';
         final status = data['status']?.toString()?.toLowerCase() ?? '';
 
-        // Count ALL students regardless of status (for Students card)
         if (role == 'Student') {
           totalStudents++;
-          if (status == 'pending') {
-            pendingApprovals++;
-            print('   ⏳ Pending Student: ${data['email']}');
-          } else if (status == 'approved') {
-            print('   ✅ Approved Student: ${data['email']}');
-          }
-        }
-        // Count ALL supervisors regardless of status (for Supervisors card)
-        else if (role == 'Supervisor') {
+          if (status == 'pending') pendingApprovals++;
+        } else if (role == 'Supervisor') {
           totalSupervisors++;
-          if (status == 'pending') {
-            pendingApprovals++;
-            print('   ⏳ Pending Supervisor: ${data['email']}');
-          } else if (status == 'approved') {
-            print('   ✅ Approved Supervisor: ${data['email']}');
-          }
-        }
-        // Count users with other roles or missing roles
-        else {
+          if (status == 'pending') pendingApprovals++;
+        } else {
           otherUsers++;
-          print('   👤 Other User: ${data['email']} | Role: $role | Status: $status');
-          // If they're pending, count them in pending approvals
-          if (status == 'pending') {
-            pendingApprovals++;
-          }
+          if (status == 'pending') pendingApprovals++;
         }
       }
 
-      // Fetch approved sessions for total hours
+      // IMPORTANT: Query with exact case "Approved" (capital A) as shown in your database
+      print('🔍 Fetching ALL approved work sessions with status "Approved"...');
       final approvedSessions = await _firestore
           .collection('work_sessions')
-          .where('status', isEqualTo: 'approved')
+          .where('status', isEqualTo: 'Approved')  // Note: Capital A
           .get();
 
       print('⏰ Approved work sessions found: ${approvedSessions.docs.length}');
 
       // Calculate total hours approved
       double totalHoursApproved = 0.0;
-      for (var session in approvedSessions.docs) {
-        final data = session.data() as Map<String, dynamic>;
-        final hours = data['hours'];
-        if (hours != null) {
-          if (hours is int) {
-            totalHoursApproved += hours.toDouble();
-          } else if (hours is double) {
-            totalHoursApproved += hours;
-          } else if (hours is String) {
-            totalHoursApproved += double.tryParse(hours) ?? 0.0;
+      List<String> approvedSessionIds = [];
+      
+      if (approvedSessions.docs.isNotEmpty) {
+        for (var session in approvedSessions.docs) {
+          final data = session.data() as Map<String, dynamic>;
+          final hours = data['hours'];
+          final studentEmail = data['studentEmail'] ?? 'Unknown';
+          final date = data['date'] ?? 'No date';
+          
+          double hourValue = 0.0;
+          if (hours != null) {
+            if (hours is int) {
+              hourValue = hours.toDouble();
+            } else if (hours is double) {
+              hourValue = hours;
+            } else if (hours is String) {
+              hourValue = double.tryParse(hours) ?? 0.0;
+            }
+            
+            totalHoursApproved += hourValue;
+            approvedSessionIds.add(session.id);
+            print('   ✅ Session: $studentEmail - $hourValue hours on $date');
           }
         }
+      } else {
+        print('⚠️ No approved sessions found with status "Approved"');
       }
 
       print('📈 Calculated stats:');
@@ -246,8 +316,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       print('- Total Supervisors (all): $totalSupervisors');
       print('- Other Users: $otherUsers');
       print('- Pending Approvals: $pendingApprovals');
-      print('- Total Hours Approved: $totalHoursApproved');
-      print('- TOTAL USERS IN DB: ${allUsers.docs.length}');
+      print('- Total Hours Approved: $totalHoursApproved (from ${approvedSessions.docs.length} sessions)');
+      print('- Approved Session IDs: $approvedSessionIds');
 
       setState(() {
         stats = {
@@ -255,17 +325,19 @@ class _AdminDashboardState extends State<AdminDashboard>
           "totalSupervisors": totalSupervisors,
           "pendingApprovals": pendingApprovals,
           "totalHoursApproved": totalHoursApproved,
-          "totalUsers": allUsers.docs.length, // Add total users count
+          "totalUsers": allUsers.docs.length,
         };
       });
+      
+      print('✅ Dashboard stats updated with $totalHoursApproved total hours');
     } catch (e) {
       print('❌ Error loading dashboard stats: $e');
       print('Stack trace: ${e.toString()}');
-      throw Exception('Failed to load dashboard stats: $e');
+      _showSnack('Error loading stats: $e');
     }
   }
 
-  // Load report statistics - WITH ENHANCED DEBUG LOGGING
+  // Load report statistics - FIXED with correct case
   Future<void> _loadReportStats() async {
     try {
       final now = DateTime.now();
@@ -273,15 +345,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       final lastMonthStart = DateTime(now.year, now.month - 1, 1);
 
       print('📅 Loading report stats for:');
-      print(
-          '   - Current month: ${now.year}-${now.month} ($currentMonthStart)');
-      print(
-          '   - Last month: ${lastMonthStart.year}-${lastMonthStart.month} ($lastMonthStart)');
+      print('   - Current month: ${now.year}-${now.month}');
+      print('   - Last month: ${lastMonthStart.year}-${lastMonthStart.month}');
 
-      // Fetch ALL approved work sessions
+      // Fetch ALL approved work sessions with correct case "Approved"
       final allApprovedSessions = await _firestore
           .collection('work_sessions')
-          .where('status', isEqualTo: 'approved')
+          .where('status', isEqualTo: 'Approved')  // Note: Capital A
           .get();
 
       print('📋 Total approved sessions: ${allApprovedSessions.docs.length}');
@@ -299,32 +369,23 @@ class _AdminDashboardState extends State<AdminDashboard>
 
         if (submittedAt != null && hours != null) {
           double hourValue = 0.0;
-          if (hours is int) {
-            hourValue = hours.toDouble();
-          } else if (hours is double) {
-            hourValue = hours;
-          } else if (hours is String) {
-            hourValue = double.tryParse(hours) ?? 0.0;
-          }
+          if (hours is int) hourValue = hours.toDouble();
+          else if (hours is double) hourValue = hours;
+          else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
 
           // Check if this month
           if (submittedAt.year == now.year && submittedAt.month == now.month) {
             thisMonthHours += hourValue;
             thisMonthCount++;
-            print(
-                '   📅 This month session: $studentEmail - $hourValue on ${DateFormat('yyyy-MM-dd').format(submittedAt)}');
+            print('   📅 This month session: $studentEmail - $hourValue');
           }
-
           // Check if last month
-          if (submittedAt.year == lastMonthStart.year &&
+          else if (submittedAt.year == lastMonthStart.year &&
               submittedAt.month == lastMonthStart.month) {
             lastMonthHours += hourValue;
             lastMonthCount++;
-            print(
-                '   📅 Last month session: $studentEmail - $hourValue on ${DateFormat('yyyy-MM-dd').format(submittedAt)}');
+            print('   📅 Last month session: $studentEmail - $hourValue');
           }
-        } else {
-          print('   ⚠️ Session missing date/hours: $studentEmail');
         }
       }
 
@@ -357,8 +418,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       });
     } catch (e) {
       print('❌ Error loading report stats: $e');
-      print('Stack trace: ${e.toString()}');
-      // Don't throw exception, just set default values
       setState(() {
         reportStats = {
           "thisMonthHours": 0.0,
@@ -371,12 +430,12 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // Load email lists for clickable cards - FIXED to show ALL users
+  // Load email lists for clickable cards - FIXED with correct case
   Future<void> _loadEmailLists() async {
     try {
       print('📧 Loading email lists...');
 
-      // Load ALL students (not just approved)
+      // Load ALL students
       final studentsSnapshot = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'Student')
@@ -387,14 +446,12 @@ class _AdminDashboardState extends State<AdminDashboard>
           .map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final email = data['email']?.toString().trim() ?? '';
-            final status = data['status']?.toString() ?? 'unknown';
-            print('   👨‍🎓 Student: $email (Status: $status)');
             return email;
           })
           .where((email) => email.isNotEmpty && _isValidEmail(email))
           .toList();
 
-      // Load ALL supervisors (not just approved)
+      // Load ALL supervisors
       final supervisorsSnapshot = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'Supervisor')
@@ -405,14 +462,12 @@ class _AdminDashboardState extends State<AdminDashboard>
           .map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final email = data['email']?.toString().trim() ?? '';
-            final status = data['status']?.toString() ?? 'unknown';
-            print('   👨‍🏫 Supervisor: $email (Status: $status)');
             return email;
           })
           .where((email) => email.isNotEmpty && _isValidEmail(email))
           .toList();
 
-      // Load ALL pending users (regardless of role)
+      // Load ALL pending users
       final pendingUsersSnapshot = await _firestore
           .collection('users')
           .where('status', isEqualTo: 'pending')
@@ -421,7 +476,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       print('⏳ Pending users found: ${pendingUsersSnapshot.docs.length}');
       _pendingActivities = pendingUsersSnapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
-        print('   ⏳ Pending user: ${data['email']} - ${data['role']}');
         return {
           'email': data['email']?.toString().trim() ?? 'No email',
           'role': data['role']?.toString() ?? 'Unknown',
@@ -432,19 +486,28 @@ class _AdminDashboardState extends State<AdminDashboard>
         };
       }).toList();
 
-      // Load approved activities for hours calculation
+      // Load approved activities for hours calculation - FIXED with "Approved" (capital A)
+      print('✅ Loading approved work sessions for card details...');
       final approvedSessions = await _firestore
           .collection('work_sessions')
-          .where('status', isEqualTo: 'approved')
+          .where('status', isEqualTo: 'Approved')  // Note: Capital A
           .get();
 
       print('✅ Approved work sessions: ${approvedSessions.docs.length}');
       _approvedActivities = approvedSessions.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
-        print('   ✅ Approved session: ${data['studentEmail']} - ${data['hours']}h');
+        final hours = data['hours'];
+        double hourValue = 0.0;
+        
+        if (hours != null) {
+          if (hours is int) hourValue = hours.toDouble();
+          else if (hours is double) hourValue = hours;
+          else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
+        }
+        
         return {
           'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
-          'hours': (data['hours'] ?? 0.0).toDouble(),
+          'hours': hourValue,
           'date': data['date']?.toString() ?? 'No date',
           'studentName': data['studentName']?.toString() ?? 'Unknown',
           'department': data['department']?.toString() ?? 'Unknown',
@@ -457,10 +520,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       print('- Supervisors (all): ${_supervisorsEmails.length}');
       print('- Pending users: ${_pendingActivities.length}');
       print('- Approved sessions: ${_approvedActivities.length}');
+      
+      // Print approved session details
+      for (var activity in _approvedActivities) {
+        print('   - ${activity['studentEmail']}: ${activity['hours']}h');
+      }
     } catch (e) {
       print('❌ Error loading email lists: $e');
-      print('Stack trace: ${e.toString()}');
-      // Initialize empty lists to avoid null errors
       _studentsEmails = [];
       _supervisorsEmails = [];
       _pendingActivities = [];
@@ -468,7 +534,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // Show modal for card details - Mobile-friendly HCI
+  // Show modal for card details
   void _showCardDetails(String cardType) {
     final Map<String, dynamic> cardData = {
       'title': '',
@@ -522,7 +588,6 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
           child: Column(
             children: [
-              // Header
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -550,11 +615,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                   ],
                 ),
               ),
-
-              // Content
               Expanded(
-                child: _buildCardContent(
-                    cardType, cardData['data'], cardData['color']),
+                child: _buildCardContent(cardType, cardData['data'], cardData['color']),
               ),
             ],
           ),
@@ -565,9 +627,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   Widget _buildCardContent(String cardType, List<dynamic> data, Color color) {
     if (isLoading) {
-      return Center(
-        child: CircularProgressIndicator(color: color),
-      );
+      return Center(child: CircularProgressIndicator(color: color));
     }
 
     if (data.isEmpty) {
@@ -575,24 +635,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.info_outline,
-              size: 60,
-              color: color.withOpacity(0.3),
-            ),
+            Icon(Icons.info_outline, size: 60, color: color.withOpacity(0.3)),
             const SizedBox(height: 16),
-            Text(
-              'No data available',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-            ),
+            Text('No data available', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
             const SizedBox(height: 8),
             ElevatedButton.icon(
               onPressed: _refreshData,
-              icon: Icon(Icons.refresh, size: 16),
-              label: Text('Refresh'),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Refresh'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: color.withOpacity(0.1),
                 foregroundColor: color,
@@ -604,7 +654,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
 
     if (cardType == 'students' || cardType == 'supervisors') {
-      // Email lists
       return ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: data.length,
@@ -616,29 +665,18 @@ class _AdminDashboardState extends State<AdminDashboard>
             child: ListTile(
               leading: CircleAvatar(
                 backgroundColor: color.withOpacity(0.1),
-                child: Icon(
-                  Icons.email_outlined,
-                  color: color,
-                ),
+                child: Icon(Icons.email_outlined, color: color),
               ),
-              title: Text(
-                email,
-                style: const TextStyle(fontSize: 14),
-                overflow: TextOverflow.ellipsis,
-              ),
+              title: Text(email, style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis),
               subtitle: Text(
                 cardType == 'students' ? 'Student' : 'Supervisor',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ),
           );
         },
       );
     } else if (cardType == 'pending') {
-      // Pending approvals (users pending admin approval, not work sessions)
       return ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: data.length,
@@ -650,41 +688,16 @@ class _AdminDashboardState extends State<AdminDashboard>
             child: ListTile(
               leading: CircleAvatar(
                 backgroundColor: color.withOpacity(0.1),
-                child: Icon(
-                  Icons.person_add,
-                  color: color,
-                ),
+                child: Icon(Icons.person_add, color: color),
               ),
-              title: Text(
-                user['email'] ?? 'No email',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              ),
+              title: Text(user['email'] ?? 'No email', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 4),
-                  Text(
-                    'ID: ${user['idNumber'] ?? 'No ID'}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  Text(
-                    'Department: ${user['department'] ?? 'No department'}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  Text(
-                    'Role: ${user['role'] ?? 'Unknown'}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
+                  Text('ID: ${user['idNumber'] ?? 'No ID'}', style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                  Text('Department: ${user['department'] ?? 'No department'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  Text('Role: ${user['role'] ?? 'Unknown'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 ],
               ),
             ),
@@ -692,7 +705,6 @@ class _AdminDashboardState extends State<AdminDashboard>
         },
       );
     } else {
-      // Hours approved - show list of all approved hours by department
       return ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: data.length,
@@ -704,51 +716,17 @@ class _AdminDashboardState extends State<AdminDashboard>
             child: ListTile(
               leading: CircleAvatar(
                 backgroundColor: color.withOpacity(0.1),
-                child: Icon(
-                  Icons.check_circle,
-                  color: color,
-                ),
+                child: Icon(Icons.check_circle, color: color),
               ),
-              title: Text(
-                activity['studentEmail'] ?? 'No student',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              ),
+              title: Text(activity['studentEmail'] ?? 'No student', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 4),
-                  Text(
-                    '${activity['hours']?.toStringAsFixed(1) ?? '0.0'} hours',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey[700],
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'Department: ${activity['department'] ?? 'Unknown'}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  Text(
-                    'Date: ${activity['date'] ?? 'No date'}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  if (activity['supervisorEmail'] != null &&
-                      activity['supervisorEmail'].isNotEmpty)
-                    Text(
-                      'Supervisor: ${activity['supervisorEmail']}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
+                  Text('${activity['hours']?.toStringAsFixed(2) ?? '0.00'} hours', 
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700], fontWeight: FontWeight.bold)),
+                  Text('Department: ${activity['department'] ?? 'Unknown'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  Text('Date: ${activity['date'] ?? 'No date'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 ],
               ),
             ),
@@ -779,9 +757,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: color,
-        content: Center(
-          child: Text(message, style: const TextStyle(color: Colors.white)),
-        ),
+        content: Center(child: Text(message, style: const TextStyle(color: Colors.white))),
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.only(bottom: 40, left: 40, right: 40),
@@ -806,12 +782,8 @@ class _AdminDashboardState extends State<AdminDashboard>
             child: SafeArea(
               child: Column(
                 children: [
-                  // Header
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Stack(
                       alignment: Alignment.center,
                       children: [
@@ -819,11 +791,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                           opacity: _fadeAnimation,
                           child: const Text(
                             "WorkStudy",
-                            style: TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                         ),
                         Align(
@@ -834,9 +802,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                               _firebaseService.signOut();
                               Navigator.pushReplacement(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => const LoginPage(),
-                                ),
+                                MaterialPageRoute(builder: (_) => const LoginPage()),
                               );
                             },
                           ),
@@ -844,8 +810,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                       ],
                     ),
                   ),
-
-                  // Tabs
                   Container(
                     color: Colors.white,
                     child: TabBar(
@@ -860,8 +824,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                       ],
                     ),
                   ),
-
-                  // Tab content
                   Expanded(
                     child: TabBarView(
                       controller: _tabController,
@@ -876,16 +838,11 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
           ),
-
-          // Loading overlay
           if (isLoading)
             Container(
               color: Colors.black54.withOpacity(0.5),
               child: const Center(
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 4,
-                ),
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 4),
               ),
             ),
         ],
@@ -893,7 +850,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Overview Tab --- FIXED to show correct hours data
+  // --- Overview Tab --- Shows total approved hours
   Widget _buildOverviewTab() {
     final bool hasStats = stats.isNotEmpty && stats["totalStudents"] != null;
 
@@ -905,37 +862,27 @@ class _AdminDashboardState extends State<AdminDashboard>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // System Overview Header
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.9),
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black12, blurRadius: 4),
-                ],
+                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
                     "System Overview",
-                    style: TextStyle(
-                      color: Colors.blue,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(color: Colors.blue, fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     _lastRefreshTime != null
                         ? "Data last refreshed: ${DateFormat('MMM dd, h:mm a').format(_lastRefreshTime!)}"
                         : "Loading data...",
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black54,
-                    ),
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -956,14 +903,23 @@ class _AdminDashboardState extends State<AdminDashboard>
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextButton.icon(
-                          onPressed: () {
-                            _showSnack("Tap any card for detailed view",
-                                color: Colors.blue);
-                          },
+                          onPressed: () => _showSnack("Tap any card for detailed view", color: Colors.blue),
                           icon: const Icon(Icons.info_outline, size: 18),
                           label: const Text("View Details"),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.blue,
+                          style: TextButton.styleFrom(foregroundColor: Colors.blue),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _debugCheckWorkSessions,
+                          icon: const Icon(Icons.bug_report, size: 18),
+                          label: const Text("Debug DB"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            elevation: 2,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
                           ),
                         ),
                       ),
@@ -973,8 +929,6 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
             const SizedBox(height: 20),
-
-            // Stats Cards
             if (!hasStats && isLoading)
               GridView.count(
                 shrinkWrap: true,
@@ -994,48 +948,19 @@ class _AdminDashboardState extends State<AdminDashboard>
                 mainAxisSpacing: 12,
                 childAspectRatio: 1.1,
                 children: [
-                  _statCard(
-                    Icons.people,
-                    "Students",
-                    "${stats["totalStudents"]}",
-                    Colors.blue,
-                    cardType: 'students',
-                  ),
-                  _statCard(
-                    Icons.supervisor_account,
-                    "Supervisors",
-                    "${stats["totalSupervisors"]}",
-                    Colors.purple,
-                    cardType: 'supervisors',
-                  ),
-                  _statCard(
-                    Icons.pending_actions,
-                    "Pending",
-                    "${stats["pendingApprovals"]}",
-                    Colors.orange,
-                    cardType: 'pending',
-                  ),
-                  _statCard(
-                    Icons.timer,
-                    "Hours",
-                    "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(1)}h",
-                    Colors.green,
-                    cardType: 'hours',
-                  ),
+                  _statCard(Icons.people, "Students", "${stats["totalStudents"]}", Colors.blue, cardType: 'students'),
+                  _statCard(Icons.supervisor_account, "Supervisors", "${stats["totalSupervisors"]}", Colors.purple, cardType: 'supervisors'),
+                  _statCard(Icons.pending_actions, "Pending", "${stats["pendingApprovals"]}", Colors.orange, cardType: 'pending'),
+                  _statCard(Icons.timer, "Hours", "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(2)}h", Colors.green, cardType: 'hours'),
                 ],
               ),
-            
             const SizedBox(height: 20),
-
-            // Monthly Hours Summary - FIXED: Now shows correct hours data
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black12, blurRadius: 3),
-                ],
+                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 3)],
               ),
               child: Column(
                 children: [
@@ -1043,182 +968,54 @@ class _AdminDashboardState extends State<AdminDashboard>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        "Monthly Hours Summary",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: Colors.blue,
-                        ),
+                        "Hours Summary",
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue),
                       ),
-                      Icon(Icons.trending_up, color: Colors.blue, size: 20),
+                      Icon(Icons.access_time, color: Colors.blue, size: 20),
                     ],
                   ),
                   const SizedBox(height: 16),
-                  
-                  // Hours Summary Row - FIXED: Using correct data with null checks
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildHourMetric(
-                        "This Month",
-                        reportStats["thisMonthHours"] != null 
-                            ? "${(reportStats["thisMonthHours"] as double).toStringAsFixed(1)}h"
-                            : "0.0h",
-                        Colors.blue,
-                        Icons.calendar_today,
-                      ),
-                      Container(
-                        height: 30,
-                        width: 1,
-                        color: Colors.grey[300],
-                      ),
-                      _buildHourMetric(
-                        "Last Month",
-                        reportStats["lastMonthHours"] != null
-                            ? "${(reportStats["lastMonthHours"] as double).toStringAsFixed(1)}h"
-                            : "0.0h",
-                        Colors.grey,
-                        Icons.calendar_view_month,
-                      ),
-                      Container(
-                        height: 30,
-                        width: 1,
-                        color: Colors.grey[300],
-                      ),
-                      _buildHourMetric(
-                        "Avg/Student",
-                        reportStats["avgHoursPerStudent"] != null
-                            ? "${(reportStats["avgHoursPerStudent"] as double).toStringAsFixed(1)}h"
-                            : "0.0h",
-                        Colors.green,
-                        Icons.people_outline,
-                      ),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // Progress Bar - Shows comparison between this month and last month
-                  if ((reportStats["lastMonthHours"] ?? 0.0) > 0 || 
-                      (reportStats["thisMonthHours"] ?? 0.0) > 0) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                "Progress vs Last Month",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                              Text(
-                                _calculatePercentageChange(
-                                  reportStats["lastMonthHours"] ?? 0.0,
-                                  reportStats["thisMonthHours"] ?? 0.0,
-                                ),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: _getChangeColor(
-                                    reportStats["lastMonthHours"] ?? 0.0,
-                                    reportStats["thisMonthHours"] ?? 0.0,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: _calculateProgress(
-                                reportStats["lastMonthHours"] ?? 0.0,
-                                reportStats["thisMonthHours"] ?? 0.0,
-                              ),
-                              backgroundColor: Colors.grey[200],
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                _getProgressColor(
-                                  reportStats["lastMonthHours"] ?? 0.0,
-                                  reportStats["thisMonthHours"] ?? 0.0,
-                                ),
-                              ),
-                              minHeight: 8,
+                  Center(
+                    child: Column(
+                      children: [
+                        Text(
+                          "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(2)}",
+                          style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.green),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Total Approved Hours",
+                          style: TextStyle(fontSize: 16, color: Colors.black54),
+                        ),
+                        const SizedBox(height: 16),
+                        if ((stats["totalHoursApproved"] ?? 0.0) == 0.0)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    // Show empty state when no hours data
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Center(
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.info_outline,
-                              size: 32,
-                              color: Colors.grey[400],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              "No hours data available",
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "Hours will appear when work sessions are approved",
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[500],
-                              ),
+                            child: const Text(
+                              "No approved hours yet. Hours will appear when work sessions are approved.",
+                              style: TextStyle(fontSize: 14, color: Colors.grey),
                               textAlign: TextAlign.center,
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                  
-                  // Debug info - You can remove this in production
-                  if (stats["totalHoursApproved"] != null) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey[200]!),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            "Total Approved Hours (All Time): ${(stats["totalHoursApproved"] as double).toStringAsFixed(1)}h",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[700],
-                              fontWeight: FontWeight.w500,
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green[50],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              "Total from ${_approvedActivities.length} approved sessions",
+                              style: TextStyle(fontSize: 14, color: Colors.green[700], fontWeight: FontWeight.w500),
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            "This Month: ${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(1)}h",
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
@@ -1226,80 +1023,6 @@ class _AdminDashboardState extends State<AdminDashboard>
         ),
       ),
     );
-  }
-
-  // Helper method to build hour metrics with icons
-  Widget _buildHourMetric(String label, String value, Color color, IconData icon) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            icon,
-            color: color,
-            size: 16,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey[600],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // Helper method to calculate progress percentage
-  double _calculateProgress(double lastMonth, double thisMonth) {
-    if (lastMonth <= 0 && thisMonth <= 0) return 0.0;
-    if (lastMonth <= 0) return 1.0; // If no hours last month, show full progress if this month has hours
-    if (thisMonth <= 0) return 0.0;
-    
-    // Cap at 1.0 (100%) for the progress bar
-    return (thisMonth / lastMonth).clamp(0.0, 1.0);
-  }
-
-  // Helper method to get progress bar color
-  Color _getProgressColor(double lastMonth, double thisMonth) {
-    if (lastMonth <= 0 && thisMonth > 0) return Colors.green;
-    if (thisMonth > lastMonth) return Colors.green;
-    if (thisMonth < lastMonth) return Colors.orange;
-    return Colors.blue;
-  }
-
-  // Helper method to calculate percentage change
-  String _calculatePercentageChange(double lastMonth, double thisMonth) {
-    if (lastMonth <= 0 && thisMonth > 0) return "+100%";
-    if (lastMonth <= 0) return "0%";
-    if (thisMonth <= 0) return "-100%";
-    
-    double change = ((thisMonth - lastMonth) / lastMonth) * 100;
-    String sign = change > 0 ? "+" : "";
-    return "$sign${change.toStringAsFixed(1)}%";
-  }
-
-  // Helper method to get change color
-  Color _getChangeColor(double lastMonth, double thisMonth) {
-    if (lastMonth <= 0 && thisMonth > 0) return Colors.green;
-    if (thisMonth > lastMonth) return Colors.green;
-    if (thisMonth < lastMonth) return Colors.red;
-    return Colors.grey;
   }
 
   // --- Users Tab --- 
@@ -1352,49 +1075,34 @@ class _AdminDashboardState extends State<AdminDashboard>
                 if (snapshot.hasError) {
                   return Center(child: Text('Error: ${snapshot.error}'));
                 }
-
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-
                 final users = snapshot.data!.docs;
-                // Sort users by createdAt timestamp (newest first)
-                final sortedUsers = users
-                  ..sort((a, b) {
-                    final aData = a.data() as Map<String, dynamic>;
-                    final bData = b.data() as Map<String, dynamic>;
-                    final aTime = parseAnyTimestamp(aData['createdAt']);
-                    final bTime = parseAnyTimestamp(bData['createdAt']);
-
-                    if (aTime == null && bTime == null) return 0;
-                    if (aTime == null) return 1;
-                    if (bTime == null) return -1;
-
-                    return bTime
-                        .compareTo(aTime); // Descending order (newest first)
-                  });
+                final sortedUsers = users..sort((a, b) {
+                  final aData = a.data() as Map<String, dynamic>;
+                  final bData = b.data() as Map<String, dynamic>;
+                  final aTime = parseAnyTimestamp(aData['createdAt']);
+                  final bTime = parseAnyTimestamp(bData['createdAt']);
+                  if (aTime == null && bTime == null) return 0;
+                  if (aTime == null) return 1;
+                  if (bTime == null) return -1;
+                  return bTime.compareTo(aTime);
+                });
 
                 final filteredUsers = sortedUsers.where((user) {
                   final userData = user.data() as Map<String, dynamic>;
-                  final email =
-                      userData['email']?.toString().toLowerCase() ?? '';
+                  final email = userData['email']?.toString().toLowerCase() ?? '';
                   final role = userData['role']?.toString().toLowerCase() ?? '';
                   final name = userData['name']?.toString().toLowerCase() ?? '';
-                  final idNumber =
-                      userData['idNumber']?.toString().toLowerCase() ?? '';
-
-                  return email.contains(searchQuery) ||
-                      role.contains(searchQuery) ||
-                      name.contains(searchQuery) ||
-                      idNumber.contains(searchQuery);
+                  final idNumber = userData['idNumber']?.toString().toLowerCase() ?? '';
+                  return email.contains(searchQuery) || role.contains(searchQuery) || 
+                         name.contains(searchQuery) || idNumber.contains(searchQuery);
                 }).toList();
 
                 if (filteredUsers.isEmpty) {
                   return const Center(
-                    child: Text(
-                      'No users found',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                    ),
+                    child: Text('No users found', style: TextStyle(fontSize: 16, color: Colors.grey)),
                   );
                 }
 
@@ -1407,10 +1115,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                     final email = userData['email'] ?? 'No email';
                     final role = userData['role'] ?? 'No role';
                     final status = userData['status'] ?? 'pending';
-                    final name = userData['name'] ?? 'No name';
                     final idNumber = userData['idNumber'] ?? 'No ID';
-                    final department =
-                        userData['department'] ?? 'No department';
+                    final department = userData['department'] ?? 'No department';
                     final createdAt = userData['createdAt'];
 
                     return Card(
@@ -1421,14 +1127,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Email only 
-                            Text(
-                              email,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
+                            Text(email, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                             const SizedBox(height: 4),
                             Text('ID: $idNumber • Department: $department'),
                             const SizedBox(height: 4),
@@ -1438,24 +1137,15 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 Text(
                                   status.toUpperCase(),
                                   style: TextStyle(
-                                    color: status == 'approved'
-                                        ? Colors.green
-                                        : status == 'pending'
-                                            ? Colors.orange
-                                            : Colors.red,
+                                    color: status == 'approved' ? Colors.green : 
+                                           status == 'pending' ? Colors.orange : Colors.red,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ],
                             ),
                             const SizedBox(height: 4),
-                            Text(
-                              'Joined: ${formatTimestamp(createdAt)}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
+                            Text('Joined: ${formatTimestamp(createdAt)}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                             const SizedBox(height: 12),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1463,36 +1153,26 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 _actionIcon(
                                   icon: Icons.check_circle,
                                   label: "Approve",
-                                  color: status == 'approved'
-                                      ? Colors.grey
-                                      : Colors.green,
-                                  onPressed: status == 'approved'
-                                      ? null
-                                      : () => _approveUser(userId, email),
+                                  color: status == 'approved' ? Colors.grey : Colors.green,
+                                  onPressed: status == 'approved' ? null : () => _approveUser(userId, email),
                                 ),
                                 _actionIcon(
                                   icon: Icons.cancel,
                                   label: "Decline",
-                                  color: status == 'declined'
-                                      ? Colors.grey
-                                      : Colors.red,
-                                  onPressed: status == 'declined'
-                                      ? null
-                                      : () => _declineUser(userId, email),
+                                  color: status == 'declined' ? Colors.grey : Colors.red,
+                                  onPressed: status == 'declined' ? null : () => _declineUser(userId, email),
                                 ),
                                 _actionIcon(
                                   icon: Icons.edit,
                                   label: "Edit",
                                   color: Colors.blue,
-                                  onPressed: () =>
-                                      _editUserDialog(userData, userId),
+                                  onPressed: () => _editUserDialog(userData, userId),
                                 ),
                                 _actionIcon(
                                   icon: Icons.delete,
                                   label: "Delete",
                                   color: Colors.orange,
-                                  onPressed: () =>
-                                      _confirmDelete(userId, email),
+                                  onPressed: () => _confirmDelete(userId, email),
                                 ),
                               ],
                             ),
@@ -1526,66 +1206,36 @@ class _AdminDashboardState extends State<AdminDashboard>
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Loading icon
             Container(
               width: 40,
               height: 40,
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), shape: BoxShape.circle),
               child: Center(
                 child: SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.grey.withOpacity(0.3),
-                  ),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey.withOpacity(0.3)),
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            // Loading value
-            Container(
-              width: 40,
-              height: 20,
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
+            Container(width: 40, height: 20, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(4))),
             const SizedBox(height: 4),
-            // Loading title
-            Container(
-              width: 60,
-              height: 14,
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
+            Container(width: 60, height: 14, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(4))),
           ],
         ),
       ),
     );
   }
 
-  Widget _statCard(IconData icon, String title, String value, Color color,
-      {required String cardType}) {
+  Widget _statCard(IconData icon, String title, String value, Color color, {required String cardType}) {
     return InkWell(
       onTap: () => _showCardDetails(cardType),
       borderRadius: BorderRadius.circular(12),
@@ -1593,13 +1243,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: color.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))],
           border: Border.all(color: color.withOpacity(0.2), width: 1),
         ),
         child: Padding(
@@ -1607,77 +1251,22 @@ class _AdminDashboardState extends State<AdminDashboard>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Icon with colored background
               Container(
                 width: 40,
                 height: 40,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Icon(icon, color: color, size: 20),
-                ),
+                decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
+                child: Center(child: Icon(icon, color: color, size: 20)),
               ),
               const SizedBox(height: 12),
-              // Value - larger and bold
-              Text(
-                value,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              Text(value, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
-              // Title
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              // Small touch indicator
+              Text(title, style: const TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
-              Icon(
-                Icons.touch_app,
-                size: 10,
-                color: color.withOpacity(0.6),
-              ),
+              Icon(Icons.touch_app, size: 10, color: color.withOpacity(0.6)),
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Widget _miniStat(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: Colors.black54,
-          ),
-        ),
-      ],
     );
   }
 
@@ -1699,9 +1288,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           onPressed: onPressed,
           style: ElevatedButton.styleFrom(
             backgroundColor: color,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             elevation: 3,
             padding: const EdgeInsets.symmetric(horizontal: 14),
           ),
@@ -1710,26 +1297,11 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  Widget _actionIcon({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback? onPressed,
-  }) {
+  Widget _actionIcon({required IconData icon, required String label, required Color color, required VoidCallback? onPressed}) {
     return Column(
       children: [
-        IconButton(
-          icon: Icon(icon, color: color),
-          onPressed: onPressed,
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: color,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        IconButton(icon: Icon(icon, color: color), onPressed: onPressed),
+        Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -1743,10 +1315,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         title: const Text("Search Users"),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(
-            hintText: "Enter email, name, or role",
-            border: OutlineInputBorder(),
-          ),
+          decoration: const InputDecoration(hintText: "Enter email, name, or role", border: OutlineInputBorder()),
         ),
         actions: [
           TextButton(
@@ -1764,19 +1333,11 @@ class _AdminDashboardState extends State<AdminDashboard>
   Future<void> _createUserWithEmailAndPassword(String email, String password,
       String role, String department, String idNumber) async {
     try {
-      // Use a different approach - create user through a separate auth instance
-      // This prevents auto-signin
-      final FirebaseAuth tempAuth =
-          FirebaseAuth.instanceFor(app: Firebase.app());
-
-      // Create user without affecting current session
-      final UserCredential userCredential =
-          await tempAuth.createUserWithEmailAndPassword(
+      final FirebaseAuth tempAuth = FirebaseAuth.instanceFor(app: Firebase.app());
+      final UserCredential userCredential = await tempAuth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
-
-      // Store user data in Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
         'email': email,
         'role': role,
@@ -1785,11 +1346,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         'status': 'approved',
         'createdAt': FieldValue.serverTimestamp(),
       });
-
-      // Sign out from the temp auth instance (doesn't affect main auth)
       await tempAuth.signOut();
-
-      // Success! Admin stays logged in
       return;
     } on FirebaseAuthException catch (e) {
       if (e.code == 'email-already-in-use') {
@@ -1809,7 +1366,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     final idNumberController = TextEditingController();
     final passwordController = TextEditingController();
     final departmentController = TextEditingController();
-
     bool obscureTextAddUser = true;
 
     showDialog(
@@ -1823,30 +1379,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: emailController,
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                  ),
+                  TextField(controller: emailController, decoration: const InputDecoration(labelText: "Email", border: OutlineInputBorder()), keyboardType: TextInputType.emailAddress),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: idNumberController,
-                    decoration: const InputDecoration(
-                      labelText: "ID Number",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
+                  TextField(controller: idNumberController, decoration: const InputDecoration(labelText: "ID Number", border: OutlineInputBorder())),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: departmentController,
-                    decoration: const InputDecoration(
-                      labelText: "Department",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
+                  TextField(controller: departmentController, decoration: const InputDecoration(labelText: "Department", border: OutlineInputBorder())),
                   const SizedBox(height: 12),
                   TextField(
                     controller: passwordController,
@@ -1856,17 +1393,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                       border: const OutlineInputBorder(),
                       hintText: "Minimum 6 characters",
                       suffixIcon: IconButton(
-                        icon: Icon(
-                          obscureTextAddUser
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                          color: Colors.grey,
-                        ),
-                        onPressed: () {
-                          setDialogState(() {
-                            obscureTextAddUser = !obscureTextAddUser;
-                          });
-                        },
+                        icon: Icon(obscureTextAddUser ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                        onPressed: () => setDialogState(() => obscureTextAddUser = !obscureTextAddUser),
                       ),
                     ),
                   ),
@@ -1874,10 +1402,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
               ElevatedButton(
                 onPressed: () async {
                   final email = emailController.text.trim();
@@ -1885,26 +1410,18 @@ class _AdminDashboardState extends State<AdminDashboard>
                   final department = departmentController.text.trim();
                   final password = passwordController.text.trim();
 
-                  if (!_isValidEmail(email) ||
-                      idNumber.isEmpty ||
-                      department.isEmpty ||
-                      password.length < 6) {
+                  if (!_isValidEmail(email) || idNumber.isEmpty || department.isEmpty || password.length < 6) {
                     Navigator.pop(context);
-                    _showSnack(
-                        "⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
+                    _showSnack("⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
                     return;
                   }
 
                   Navigator.pop(context);
                   await _showLoadingEffect(() async {
                     try {
-                      await _createUserWithEmailAndPassword(
-                          email, password, role, department, idNumber);
-                      _showSnack(
-                        "$role added successfully. They can now login with the provided credentials.",
-                        color: Colors.green,
-                      );
-                      await _loadAllData(); // Refresh all data
+                      await _createUserWithEmailAndPassword(email, password, role, department, idNumber);
+                      _showSnack("$role added successfully. They can now login with the provided credentials.", color: Colors.green);
+                      await _loadAllData();
                     } catch (e) {
                       _showSnack("Error adding user: $e");
                     }
@@ -1923,11 +1440,8 @@ class _AdminDashboardState extends State<AdminDashboard>
     await _showLoadingEffect(() async {
       try {
         await _firebaseService.updateUserStatus(userId, 'approved');
-        _showSnack(
-          "$email approved successfully.",
-          color: Colors.green,
-        );
-        await _loadAllData(); // Refresh all data
+        _showSnack("$email approved successfully.", color: Colors.green);
+        await _loadAllData();
       } catch (e) {
         _showSnack("Error approving user: $e");
       }
@@ -1938,11 +1452,8 @@ class _AdminDashboardState extends State<AdminDashboard>
     await _showLoadingEffect(() async {
       try {
         await _firebaseService.updateUserStatus(userId, 'declined');
-        _showSnack(
-          "$email declined.",
-          color: Colors.red,
-        );
-        await _loadAllData(); // Refresh all data
+        _showSnack("$email declined.", color: Colors.red);
+        await _loadAllData();
       } catch (e) {
         _showSnack("Error declining user: $e");
       }
@@ -1951,21 +1462,11 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   void _editUserDialog(Map<String, dynamic> user, String userId) {
     final emailController = TextEditingController(text: user["email"] ?? '');
-    final idNumberController =
-        TextEditingController(text: user["idNumber"] ?? '');
-    final departmentController =
-        TextEditingController(text: user["department"] ?? '');
-
-    // Get the role and ensure it's valid
+    final idNumberController = TextEditingController(text: user["idNumber"] ?? '');
+    final departmentController = TextEditingController(text: user["department"] ?? '');
     String role = user["role"]?.toString() ?? 'Student';
-
-    // Define valid roles
     final List<String> validRoles = ["Student", "Supervisor"];
-
-    // If the current role isn't valid, default to 'Student'
-    if (!validRoles.contains(role)) {
-      role = 'Student';
-    }
+    if (!validRoles.contains(role)) role = 'Student';
 
     showDialog(
       context: context,
@@ -1977,80 +1478,36 @@ class _AdminDashboardState extends State<AdminDashboard>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(
-                    controller: emailController,
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                  ),
+                  TextField(controller: emailController, decoration: const InputDecoration(labelText: "Email", border: OutlineInputBorder()), keyboardType: TextInputType.emailAddress),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: idNumberController,
-                    decoration: const InputDecoration(
-                      labelText: "ID Number",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
+                  TextField(controller: idNumberController, decoration: const InputDecoration(labelText: "ID Number", border: OutlineInputBorder())),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: departmentController,
-                    decoration: const InputDecoration(
-                      labelText: "Department",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
+                  TextField(controller: departmentController, decoration: const InputDecoration(labelText: "Department", border: OutlineInputBorder())),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: role,
-                    items: validRoles.map((String role) {
-                      return DropdownMenuItem<String>(
-                        value: role,
-                        child: Text(role),
-                      );
-                    }).toList(),
+                    items: validRoles.map((String role) => DropdownMenuItem<String>(value: role, child: Text(role))).toList(),
                     onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        setState(() {
-                          role = newValue;
-                        });
-                      }
+                      if (newValue != null) setState(() => role = newValue);
                     },
-                    decoration: const InputDecoration(
-                      labelText: "Role",
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please select a role';
-                      }
-                      return null;
-                    },
+                    decoration: const InputDecoration(labelText: "Role", border: OutlineInputBorder()),
                   ),
                 ],
               ),
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
               ElevatedButton(
                 onPressed: () async {
                   final email = emailController.text.trim();
                   final idNumber = idNumberController.text.trim();
                   final department = departmentController.text.trim();
 
-                  if (!_isValidEmail(email) ||
-                      idNumber.isEmpty ||
-                      department.isEmpty) {
+                  if (!_isValidEmail(email) || idNumber.isEmpty || department.isEmpty) {
                     Navigator.pop(context);
                     _showSnack("⚠️ Please fill all fields correctly.");
                     return;
                   }
-
-                  // Ensure role is valid
                   if (!validRoles.contains(role)) {
                     Navigator.pop(context);
                     _showSnack("⚠️ Please select a valid role.");
@@ -2060,17 +1517,9 @@ class _AdminDashboardState extends State<AdminDashboard>
                   Navigator.pop(context);
                   await _showLoadingEffect(() async {
                     try {
-                      await _firebaseService.updateUser(
-                          userId,
-                          email, // Changed from user["name"] ?? ''
-                          role,
-                          department,
-                          idNumber);
-                      _showSnack(
-                        "✅ User updated successfully.",
-                        color: Colors.green,
-                      );
-                      await _loadAllData(); // Refresh all data
+                      await _firebaseService.updateUser(userId, email, role, department, idNumber);
+                      _showSnack("✅ User updated successfully.", color: Colors.green);
+                      await _loadAllData();
                     } catch (e) {
                       _showSnack("Error updating user: $e");
                     }
@@ -2092,10 +1541,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         title: const Text("Delete User"),
         content: Text("Are you sure you want to remove $email?"),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
@@ -2103,11 +1549,8 @@ class _AdminDashboardState extends State<AdminDashboard>
               await _showLoadingEffect(() async {
                 try {
                   await _firebaseService.deleteUser(userId);
-                  _showSnack(
-                    "$email removed successfully.",
-                    color: Colors.green,
-                  );
-                  await _loadAllData(); // Refresh all data
+                  _showSnack("$email removed successfully.", color: Colors.green);
+                  await _loadAllData();
                 } catch (e) {
                   _showSnack("Error deleting user: $e");
                 }
@@ -2123,11 +1566,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   // --- Export Functions ---
   Future<List<Map<String, dynamic>>> _fetchReportData() async {
     try {
-      // Fetch users data - order by createdAt descending (newest first)
-      final usersSnapshot = await _firestore
-          .collection('users')
-          .orderBy('createdAt', descending: true)
-          .get();
+      final usersSnapshot = await _firestore.collection('users').orderBy('createdAt', descending: true).get();
       final users = usersSnapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return {
@@ -2141,27 +1580,16 @@ class _AdminDashboardState extends State<AdminDashboard>
         };
       }).toList();
 
-      // Fetch work sessions data - FIXED: Ensure we get ALL sessions
-      final sessionsSnapshot = await _firestore
-          .collection('work_sessions')
-          .orderBy('submittedAt', descending: true)
-          .get();
-
-      print(
-          '🔍 Fetching work sessions... Found ${sessionsSnapshot.docs.length} sessions');
+      final sessionsSnapshot = await _firestore.collection('work_sessions').orderBy('submittedAt', descending: true).get();
+      print('🔍 Fetching work sessions... Found ${sessionsSnapshot.docs.length} sessions');
 
       final sessions = sessionsSnapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
-
-        // Debug logging for each session
-        print(
-            '📄 Session ${doc.id}: ${data['studentEmail']} - ${data['hours']}h - ${data['status']}');
-
         return {
           'id': doc.id,
           'studentId': data['studentId']?.toString() ?? '',
           'studentEmail': data['studentEmail']?.toString() ?? '',
-          'hours': (data['hours'] ?? 0.0).toDouble(),
+          'hours': _extractHours(data),
           'status': data['status']?.toString() ?? '',
           'reportDetails': data['reportDetails']?.toString() ?? '',
           'date': data['date']?.toString() ?? '',
@@ -2195,11 +1623,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           }
 
           final headers = data.first.keys.toList();
-          final tableData = data.map((row) {
-            return headers
-                .map((header) => row[header]?.toString() ?? '')
-                .toList();
-          }).toList();
+          final tableData = data.map((row) => headers.map((header) => row[header]?.toString() ?? '').toList()).toList();
 
           pdf.addPage(
             pw.Page(
@@ -2208,112 +1632,45 @@ class _AdminDashboardState extends State<AdminDashboard>
                 return pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    // Header Section
                     pw.Row(
                       children: [
                         pw.Container(
                           width: 40,
                           height: 40,
-                          decoration: pw.BoxDecoration(
-                            color: PdfColors.blue500,
-                            shape: pw.BoxShape.circle,
-                          ),
-                          child: pw.Center(
-                            child: pw.Text(
-                              "WS",
-                              style: pw.TextStyle(
-                                color: PdfColors.white,
-                                fontWeight: pw.FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
+                          decoration: pw.BoxDecoration(color: PdfColors.blue500, shape: pw.BoxShape.circle),
+                          child: pw.Center(child: pw.Text("WS", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14))),
                         ),
                         pw.SizedBox(width: 10),
                         pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
-                            pw.Text(
-                              "WORKSTUDY",
-                              style: pw.TextStyle(
-                                fontSize: 18,
-                                fontWeight: pw.FontWeight.bold,
-                                color: PdfColors.blue700,
-                              ),
-                            ),
-                            pw.Text(
-                              "Admin ${section['type']} Report",
-                              style: pw.TextStyle(
-                                fontSize: 12,
-                                color: PdfColors.grey600,
-                              ),
-                            ),
+                            pw.Text("WORKSTUDY", style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.blue700)),
+                            pw.Text("Admin ${section['type']} Report", style: pw.TextStyle(fontSize: 12, color: PdfColors.grey600)),
                           ],
                         ),
                       ],
                     ),
-
                     pw.SizedBox(height: 15),
-
-                    // Report Info
                     pw.Container(
                       width: double.infinity,
                       padding: const pw.EdgeInsets.all(10),
-                      decoration: pw.BoxDecoration(
-                        color: PdfColors.blue50,
-                        borderRadius: pw.BorderRadius.circular(5),
-                      ),
+                      decoration: pw.BoxDecoration(color: PdfColors.blue50, borderRadius: pw.BorderRadius.circular(5)),
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
-                          pw.Text(
-                            "Generated on: ${formatTimestampForExport(DateTime.now())}",
-                            style: pw.TextStyle(
-                              fontSize: 10,
-                              color: PdfColors.grey700,
-                            ),
-                          ),
-                          pw.Text(
-                            "Total Records: ${data.length}",
-                            style: pw.TextStyle(
-                              fontSize: 10,
-                              color: PdfColors.grey700,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
+                          pw.Text("Generated on: ${formatTimestampForExport(DateTime.now())}", style: pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                          pw.Text("Total Records: ${data.length}", style: pw.TextStyle(fontSize: 10, color: PdfColors.grey700, fontWeight: pw.FontWeight.bold)),
                         ],
                       ),
                     ),
-
                     pw.SizedBox(height: 20),
-
-                    // Table Title
-                    pw.Text(
-                      "${section['type'].replaceAll('_', ' ').toUpperCase()}",
-                      style: pw.TextStyle(
-                        fontSize: 14,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.blue800,
-                      ),
-                    ),
-
+                    pw.Text("${section['type'].replaceAll('_', ' ').toUpperCase()}", style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800)),
                     pw.SizedBox(height: 10),
-
-                    // Data Table - REMOVED FONT LOADING
                     pw.Table.fromTextArray(
                       border: pw.TableBorder.all(color: PdfColors.grey300),
-                      headerStyle: pw.TextStyle(
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.white,
-                        fontSize: 8,
-                      ),
-                      headerDecoration: pw.BoxDecoration(
-                        color: PdfColors.blue700,
-                      ),
-                      cellStyle: pw.TextStyle(
-                        fontSize: 7,
-                        color: PdfColors.grey800,
-                      ),
+                      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 8),
+                      headerDecoration: pw.BoxDecoration(color: PdfColors.blue700),
+                      cellStyle: pw.TextStyle(fontSize: 7, color: PdfColors.grey800),
                       headers: headers,
                       data: tableData,
                     ),
@@ -2325,21 +1682,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         }
 
         final bytes = await pdf.save();
-        final fileName =
-            "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf";
+        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf";
 
         if (kIsWeb) {
           saveFileWeb(bytes, fileName);
-          _showSnack(
-            "✅ PDF report download initiated!",
-            color: Colors.green,
-          );
+          _showSnack("✅ PDF report download initiated!", color: Colors.green);
         } else {
           final path = await saveFileOther(bytes, fileName);
-          _showSnack(
-            "✅ PDF report exported to: $path",
-            color: Colors.green,
-          );
+          _showSnack("✅ PDF report exported to: $path", color: Colors.green);
         }
       } catch (e) {
         print('❌ PDF export error: $e');
@@ -2355,20 +1705,16 @@ class _AdminDashboardState extends State<AdminDashboard>
         final workbook = excel.Excel.createExcel();
 
         for (var section in reportData) {
-          final sheetName =
-              section['type'] == 'work_sessions' ? 'Work Sessions' : 'Users';
+          final sheetName = section['type'] == 'work_sessions' ? 'Work Sessions' : 'Users';
           final sheet = workbook[sheetName];
           final data = section['data'] as List<Map<String, dynamic>>;
 
           if (data.isEmpty) continue;
 
           final headers = data.first.keys.toList();
-
-          // Create header row
           final headerRow = headers.map((h) => excel.TextCellValue(h)).toList();
           sheet.appendRow(headerRow);
 
-          // Add data rows
           for (var row in data) {
             final dataRow = <excel.CellValue>[];
             for (var header in headers) {
@@ -2378,7 +1724,6 @@ class _AdminDashboardState extends State<AdminDashboard>
             sheet.appendRow(dataRow);
           }
 
-          // Auto-size columns
           for (var i = 0; i < headers.length; i++) {
             sheet.setColAutoFit(i);
           }
@@ -2390,21 +1735,14 @@ class _AdminDashboardState extends State<AdminDashboard>
           return;
         }
 
-        final fileName =
-            "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx";
+        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx";
 
         if (kIsWeb) {
           saveFileWeb(Uint8List.fromList(bytes), fileName);
-          _showSnack(
-            "✅ Excel report download initiated!",
-            color: Colors.green,
-          );
+          _showSnack("✅ Excel report download initiated!", color: Colors.green);
         } else {
           final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
-          _showSnack(
-            "✅ Excel report exported to: $path",
-            color: Colors.green,
-          );
+          _showSnack("✅ Excel report exported to: $path", color: Colors.green);
         }
       } catch (e) {
         print('❌ Excel export error: $e');
@@ -2421,26 +1759,11 @@ class _AdminDashboardState extends State<AdminDashboard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              "Export Reports",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: Colors.blue,
-              ),
-            ),
+            const Text("Export Reports", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
             const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: () => _exportPDF("PDF"),
-              icon: const Icon(Icons.picture_as_pdf),
-              label: const Text("Export PDF Report"),
-            ),
+            ElevatedButton.icon(onPressed: () => _exportPDF("PDF"), icon: const Icon(Icons.picture_as_pdf), label: const Text("Export PDF Report")),
             const SizedBox(height: 8),
-            ElevatedButton.icon(
-              onPressed: () => _exportExcel("Excel"),
-              icon: const Icon(Icons.table_chart),
-              label: const Text("Export Excel Report"),
-            ),
+            ElevatedButton.icon(onPressed: () => _exportExcel("Excel"), icon: const Icon(Icons.table_chart), label: const Text("Export Excel Report")),
           ],
         ),
       ),
@@ -2455,26 +1778,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              "Report Summary",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: Colors.blue,
-              ),
-            ),
+            const Text("Report Summary", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
             const SizedBox(height: 12),
-            _summaryRow("This Month",
-                "${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(1)} hours"),
-            _summaryRow("Last Month",
-                "${(reportStats["lastMonthHours"] ?? 0.0).toStringAsFixed(1)} hours"),
+            _summaryRow("This Month", "${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
+            _summaryRow("Last Month", "${(reportStats["lastMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
             _summaryRow("Total Students", stats["totalStudents"].toString()),
-            _summaryRow(
-                "Pending Approvals", stats["pendingApprovals"].toString()),
-            _summaryRow("Total Hours Approved",
-                "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(1)} hrs"),
-            _summaryRow("Avg Hours/Student (This Month)",
-                "${(reportStats["avgHoursPerStudent"] ?? 0.0).toStringAsFixed(1)} hrs"),
+            _summaryRow("Pending Approvals", stats["pendingApprovals"].toString()),
+            _summaryRow("Total Hours Approved", "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(2)} hrs"),
+            _summaryRow("Avg Hours/Student (This Month)", "${(reportStats["avgHoursPerStudent"] ?? 0.0).toStringAsFixed(2)} hrs"),
           ],
         ),
       ),
