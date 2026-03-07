@@ -114,65 +114,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // --- COMPREHENSIVE DEBUG METHOD TO CHECK WORK SESSIONS ---
-  Future<void> _debugCheckWorkSessions() async {
-    setState(() => isLoading = true);
-    
-    print('\n🔴🔴🔴 DEBUG: Checking all work sessions... 🔴🔴🔴');
-    
-    try {
-      print('\n📊 FETCHING ALL WORK SESSIONS:');
-      final allSessions = await _firestore.collection('work_sessions').get();
-      print('Total documents in work_sessions: ${allSessions.docs.length}');
-      
-      if (allSessions.docs.isNotEmpty) {
-        print('\n📋 DETAILED SESSION INFORMATION:');
-        for (var i = 0; i < allSessions.docs.length; i++) {
-          final doc = allSessions.docs[i];
-          final data = doc.data();
-          print('\n--- Session ${i + 1} (ID: ${doc.id}) ---');
-          data.forEach((key, value) {
-            print('   $key: $value (${value.runtimeType})');
-          });
-        }
-        
-        // Specifically query for "Approved" status (capital A)
-        print('\n✅ CHECKING SESSIONS WITH STATUS "Approved":');
-        final approvedSessions = await _firestore
-            .collection('work_sessions')
-            .where('status', isEqualTo: 'Approved')
-            .get();
-        
-        print('Found ${approvedSessions.docs.length} sessions with status "Approved"');
-        
-        double total = 0.0;
-        for (var session in approvedSessions.docs) {
-          final data = session.data();
-          final hours = data['hours'];
-          double hourValue = 0.0;
-          if (hours != null) {
-            if (hours is int) hourValue = hours.toDouble();
-            else if (hours is double) hourValue = hours;
-            else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
-          }
-          total += hourValue;
-          print('   - Session ${session.id}: $hourValue hours (Student: ${data['studentEmail']})');
-        }
-        print('💰 TOTAL APPROVED HOURS: $total');
-        
-        _showSnack('Debug complete! Found ${approvedSessions.docs.length} approved sessions with $total hours', 
-            color: approvedSessions.docs.isNotEmpty ? Colors.green : Colors.orange);
-      }
-      
-    } catch (e) {
-      print('❌ Error in debug check: $e');
-      _showSnack('Debug error: $e', color: Colors.red);
-    }
-    
-    print('\n🔴🔴🔴 DEBUG COMPLETE =====\n');
-    setState(() => isLoading = false);
-  }
-
   // Helper method to extract hours from various possible field names
   double _extractHours(Map<String, dynamic> data) {
     // Try different possible field names
@@ -907,20 +848,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                           icon: const Icon(Icons.info_outline, size: 18),
                           label: const Text("View Details"),
                           style: TextButton.styleFrom(foregroundColor: Colors.blue),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _debugCheckWorkSessions,
-                          icon: const Icon(Icons.bug_report, size: 18),
-                          label: const Text("Debug DB"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white,
-                            elevation: 2,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
                         ),
                       ),
                     ],
