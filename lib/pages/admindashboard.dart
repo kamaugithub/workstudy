@@ -1490,7 +1490,8 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Export Functions ---
+  // --- ENHANCED EXPORT FUNCTIONS ---
+
   Future<List<Map<String, dynamic>>> _fetchReportData() async {
     try {
       final usersSnapshot = await _firestore.collection('users').orderBy('createdAt', descending: true).get();
@@ -1503,6 +1504,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           'status': data['status']?.toString() ?? '',
           'department': data['department']?.toString() ?? '',
           'idNumber': data['idNumber']?.toString() ?? '',
+          'name': data['name']?.toString() ?? '',
           'createdAt': formatTimestampForExport(data['createdAt']),
         };
       }).toList();
@@ -1516,6 +1518,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           'id': doc.id,
           'studentId': data['studentId']?.toString() ?? '',
           'studentEmail': data['studentEmail']?.toString() ?? '',
+          'studentName': data['studentName']?.toString() ?? '',
           'hours': _extractHours(data),
           'status': data['status']?.toString() ?? '',
           'reportDetails': data['reportDetails']?.toString() ?? '',
@@ -1540,76 +1543,166 @@ class _AdminDashboardState extends State<AdminDashboard>
     await _showLoadingEffect(() async {
       try {
         final reportData = await _fetchReportData();
-        final pdf = pw.Document();
+        // Use Times-Roman font for better Unicode support
+        final pdf = pw.Document(
+          theme: pw.ThemeData.withFont(
+            base: pw.Font.times(),
+            bold: pw.Font.timesBold(),
+          ),
+        );
 
-        for (var section in reportData) {
-          final data = section['data'] as List<Map<String, dynamic>>;
-          if (data.isEmpty) {
-            print('⚠️ No data for PDF ${section['type']}');
-            continue;
-          }
+        // Helper to format numbers
+        String formatNumber(dynamic value, {int decimals = 2}) {
+          if (value == null) return '0.00';
+          if (value is num) return value.toStringAsFixed(decimals);
+          return value.toString();
+        }
 
-          final headers = data.first.keys.toList();
-          final tableData = data.map((row) => headers.map((header) => row[header]?.toString() ?? '').toList()).toList();
-
-          pdf.addPage(
-            pw.Page(
-              margin: const pw.EdgeInsets.all(20),
-              build: (context) {
-                return pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(
-                          width: 40,
-                          height: 40,
-                          decoration: pw.BoxDecoration(color: PdfColors.blue500, shape: pw.BoxShape.circle),
-                          child: pw.Center(child: pw.Text("WS", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14))),
-                        ),
-                        pw.SizedBox(width: 10),
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
-                            pw.Text("WORKSTUDY", style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.blue700)),
-                            pw.Text("Admin ${section['type']} Report", style: pw.TextStyle(fontSize: 12, color: PdfColors.grey600)),
-                          ],
-                        ),
-                      ],
+        // Cover Page
+        pdf.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat.a4,
+            build: (context) => pw.Center(
+              child: pw.Column(
+                mainAxisAlignment: pw.MainAxisAlignment.center,
+                children: [
+                  pw.Container(
+                    width: 100,
+                    height: 100,
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.blue700,
+                      shape: pw.BoxShape.circle,
                     ),
-                    pw.SizedBox(height: 15),
-                    pw.Container(
-                      width: double.infinity,
-                      padding: const pw.EdgeInsets.all(10),
-                      decoration: pw.BoxDecoration(color: PdfColors.blue50, borderRadius: pw.BorderRadius.circular(5)),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text("Generated on: ${formatTimestampForExport(DateTime.now())}", style: pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
-                          pw.Text("Total Records: ${data.length}", style: pw.TextStyle(fontSize: 10, color: PdfColors.grey700, fontWeight: pw.FontWeight.bold)),
-                        ],
+                    child: pw.Center(
+                      child: pw.Text(
+                        'WS',
+                        style: pw.TextStyle(
+                          color: PdfColors.white,
+                          fontSize: 40,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
                       ),
                     ),
-                    pw.SizedBox(height: 20),
-                    pw.Text("${section['type'].replaceAll('_', ' ').toUpperCase()}", style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800)),
-                    pw.SizedBox(height: 10),
-                    pw.Table.fromTextArray(
-                      border: pw.TableBorder.all(color: PdfColors.grey300),
-                      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white, fontSize: 8),
-                      headerDecoration: pw.BoxDecoration(color: PdfColors.blue700),
-                      cellStyle: pw.TextStyle(fontSize: 7, color: PdfColors.grey800),
-                      headers: headers,
-                      data: tableData,
+                  ),
+                  pw.SizedBox(height: 30),
+                  pw.Text(
+                    'WorkStudy Admin Report',
+                    style: pw.TextStyle(
+                      fontSize: 28,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.blue800,
                     ),
+                  ),
+                  pw.SizedBox(height: 20),
+                  // FIXED: replaced en dash (U+2013) with regular hyphen (U+002D)
+                  pw.Text(
+                    'Generated: ${DateFormat('EEEE, MMMM d, yyyy - h:mm a').format(DateTime.now())}',
+                    style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700),
+                  ),
+                  pw.SizedBox(height: 40),
+                  pw.Container(
+                    width: 400,
+                    padding: const pw.EdgeInsets.all(20),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.blue50,
+                      borderRadius: pw.BorderRadius.circular(10),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        _buildSummaryRow('Total Users', '${stats['totalUsers']}'),
+                        _buildSummaryRow('Students', '${stats['totalStudents']}'),
+                        _buildSummaryRow('Supervisors', '${stats['totalSupervisors']}'),
+                        _buildSummaryRow('Pending Approvals', '${stats['pendingApprovals']}'),
+                        _buildSummaryRow('Total Approved Hours', '${formatNumber(stats['totalHoursApproved'])} h'),
+                        _buildSummaryRow('This Month Hours', '${formatNumber(reportStats['thisMonthHours'])} h'),
+                        _buildSummaryRow('Avg Hours/Student', '${formatNumber(reportStats['avgHoursPerStudent'])} h'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        // Users Section
+        final usersData = reportData.firstWhere((s) => s['type'] == 'users')['data'] as List<Map<String, dynamic>>;
+        print('📄 PDF Users data length: ${usersData.length}'); // DIAGNOSTIC
+        if (usersData.isNotEmpty) {
+          // Print first user for verification
+          print('📄 First user: ${usersData.first}');
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              build: (context) {
+                return _buildDataTable(
+                  title: 'Users',
+                  data: usersData,
+                  columns: const ['Email', 'Role', 'Status', 'Department', 'ID Number', 'Created'],
+                  rowBuilder: (user) => [
+                    user['email'] ?? '',
+                    user['role'] ?? '',
+                    user['status'] ?? '',
+                    user['department'] ?? '',
+                    user['idNumber'] ?? '',
+                    user['createdAt'] ?? '',
                   ],
                 );
               },
             ),
           );
+        } else {
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              build: (context) => pw.Center(
+                child: pw.Text('No user data available.', style: const pw.TextStyle(fontSize: 16)),
+              ),
+            ),
+          );
+        }
+
+        // Work Sessions Section
+        final sessionsData = reportData.firstWhere((s) => s['type'] == 'work_sessions')['data'] as List<Map<String, dynamic>>;
+        print('📄 PDF Sessions data length: ${sessionsData.length}'); // DIAGNOSTIC
+        if (sessionsData.isNotEmpty) {
+          // Print first session for verification
+          print('📄 First session: ${sessionsData.first}');
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              build: (context) {
+                return _buildDataTable(
+                  title: 'Work Sessions',
+                  data: sessionsData,
+                  columns: const ['Student Email', 'Student Name', 'Hours', 'Status', 'Date', 'Department', 'Submitted'],
+                  rowBuilder: (session) => [
+                    session['studentEmail'] ?? '',
+                    session['studentName'] ?? '',
+                    formatNumber(session['hours']),
+                    session['status'] ?? '',
+                    session['date'] ?? '',
+                    session['department'] ?? '',
+                    session['submittedAt'] ?? '',
+                  ],
+                );
+              },
+            ),
+          );
+        } else {
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              build: (context) => pw.Center(
+                child: pw.Text('No work session data available.', style: const pw.TextStyle(fontSize: 16)),
+              ),
+            ),
+          );
         }
 
         final bytes = await pdf.save();
-        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf";
+        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf";
 
         if (kIsWeb) {
           saveFileWeb(bytes, fileName);
@@ -1625,35 +1718,150 @@ class _AdminDashboardState extends State<AdminDashboard>
     });
   }
 
+  // Helper to build a consistent data table for PDF
+  pw.Widget _buildDataTable({
+    required String title,
+    required List<Map<String, dynamic>> data,
+    required List<String> columns,
+    required List<String> Function(Map<String, dynamic>) rowBuilder,
+  }) {
+    // Build the rows list
+    final List<List<String>> rows = data.map((row) => rowBuilder(row)).toList();
+    // Safety: if rows is empty, provide a placeholder
+    final displayRows = rows.isEmpty ? [['No data available']] : rows;
+    final displayColumns = rows.isEmpty ? ['Message'] : columns;
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          title,
+          style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
+        ),
+        pw.SizedBox(height: 10),
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.all(10),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.blue50,
+            borderRadius: pw.BorderRadius.circular(5),
+          ),
+          child: pw.Text(
+            'Total Records: ${data.length}',
+            style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        pw.SizedBox(height: 20),
+        pw.TableHelper.fromTextArray(
+          border: pw.TableBorder.all(color: PdfColors.grey300),
+          headerStyle: pw.TextStyle(
+            fontWeight: pw.FontWeight.bold,
+            color: PdfColors.white,
+            fontSize: 10,
+          ),
+          headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
+          cellStyle: const pw.TextStyle(fontSize: 8),
+          cellAlignments: {
+            for (int i = 0; i < displayColumns.length; i++) i: pw.Alignment.centerLeft,
+          },
+          headers: displayColumns,
+          data: displayRows,
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildSummaryRow(String label, String value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label, style: const pw.TextStyle(fontSize: 12)),
+          pw.Text(value, style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
   Future<void> _exportExcel(String format) async {
     await _showLoadingEffect(() async {
       try {
         final reportData = await _fetchReportData();
         final workbook = excel.Excel.createExcel();
 
-        for (var section in reportData) {
-          final sheetName = section['type'] == 'work_sessions' ? 'Work Sessions' : 'Users';
-          final sheet = workbook[sheetName];
-          final data = section['data'] as List<Map<String, dynamic>>;
+        // Helper to format numbers
+        String formatNumber(dynamic value, {int decimals = 2}) {
+          if (value == null) return '0.00';
+          if (value is num) return value.toStringAsFixed(decimals);
+          return value.toString();
+        }
 
-          if (data.isEmpty) continue;
+        // --- Dashboard Sheet ---
+        final dashboardSheet = workbook['Dashboard'];
+        dashboardSheet.appendRow([excel.TextCellValue('WorkStudy Admin Report')]);
+        dashboardSheet.appendRow([excel.TextCellValue('Generated: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}')]);
+        dashboardSheet.appendRow([]);
+        dashboardSheet.appendRow([excel.TextCellValue('Summary'), excel.TextCellValue('')]);
+        dashboardSheet.appendRow([excel.TextCellValue('Total Users'), excel.TextCellValue('${stats['totalUsers']}')]);
+        dashboardSheet.appendRow([excel.TextCellValue('Students'), excel.TextCellValue('${stats['totalStudents']}')]);
+        dashboardSheet.appendRow([excel.TextCellValue('Supervisors'), excel.TextCellValue('${stats['totalSupervisors']}')]);
+        dashboardSheet.appendRow([excel.TextCellValue('Pending Approvals'), excel.TextCellValue('${stats['pendingApprovals']}')]);
+        dashboardSheet.appendRow([excel.TextCellValue('Total Approved Hours'), excel.TextCellValue(formatNumber(stats['totalHoursApproved']))]);
+        dashboardSheet.appendRow([excel.TextCellValue('This Month Hours'), excel.TextCellValue(formatNumber(reportStats['thisMonthHours']))]);
+        dashboardSheet.appendRow([excel.TextCellValue('Last Month Hours'), excel.TextCellValue(formatNumber(reportStats['lastMonthHours']))]);
+        dashboardSheet.appendRow([excel.TextCellValue('Avg Hours/Student'), excel.TextCellValue(formatNumber(reportStats['avgHoursPerStudent']))]);
+        // Auto-fit columns
+        for (int i = 0; i < 2; i++) {
+          dashboardSheet.setColAutoFit(i);
+        }
 
-          final headers = data.first.keys.toList();
-          final headerRow = headers.map((h) => excel.TextCellValue(h)).toList();
-          sheet.appendRow(headerRow);
-
-          for (var row in data) {
-            final dataRow = <excel.CellValue>[];
-            for (var header in headers) {
-              final value = row[header]?.toString() ?? '';
-              dataRow.add(excel.TextCellValue(value));
-            }
-            sheet.appendRow(dataRow);
+        // --- Users Sheet ---
+        final usersData = reportData.firstWhere((s) => s['type'] == 'users')['data'] as List<Map<String, dynamic>>;
+        final usersSheet = workbook['Users'];
+        if (usersData.isNotEmpty) {
+          final headers = ['Email', 'Role', 'Status', 'Department', 'ID Number', 'Name', 'Created'];
+          usersSheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
+          for (var user in usersData) {
+            usersSheet.appendRow([
+              excel.TextCellValue(user['email'] ?? ''),
+              excel.TextCellValue(user['role'] ?? ''),
+              excel.TextCellValue(user['status'] ?? ''),
+              excel.TextCellValue(user['department'] ?? ''),
+              excel.TextCellValue(user['idNumber'] ?? ''),
+              excel.TextCellValue(user['name'] ?? ''),
+              excel.TextCellValue(user['createdAt'] ?? ''),
+            ]);
           }
-
-          for (var i = 0; i < headers.length; i++) {
-            sheet.setColAutoFit(i);
+          for (int i = 0; i < headers.length; i++) {
+            usersSheet.setColAutoFit(i);
           }
+        } else {
+          usersSheet.appendRow([excel.TextCellValue('No user data available.')]);
+        }
+
+        // --- Work Sessions Sheet ---
+        final sessionsData = reportData.firstWhere((s) => s['type'] == 'work_sessions')['data'] as List<Map<String, dynamic>>;
+        final sessionsSheet = workbook['Work Sessions'];
+        if (sessionsData.isNotEmpty) {
+          final headers = ['Student Email', 'Student Name', 'Hours', 'Status', 'Date', 'Department', 'Submitted'];
+          sessionsSheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
+          for (var session in sessionsData) {
+            sessionsSheet.appendRow([
+              excel.TextCellValue(session['studentEmail'] ?? ''),
+              excel.TextCellValue(session['studentName'] ?? ''),
+              excel.TextCellValue(formatNumber(session['hours'])),
+              excel.TextCellValue(session['status'] ?? ''),
+              excel.TextCellValue(session['date'] ?? ''),
+              excel.TextCellValue(session['department'] ?? ''),
+              excel.TextCellValue(session['submittedAt'] ?? ''),
+            ]);
+          }
+          for (int i = 0; i < headers.length; i++) {
+            sessionsSheet.setColAutoFit(i);
+          }
+        } else {
+          sessionsSheet.appendRow([excel.TextCellValue('No work session data available.')]);
         }
 
         final bytes = workbook.save();
@@ -1662,7 +1870,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           return;
         }
 
-        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx";
+        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.xlsx";
 
         if (kIsWeb) {
           saveFileWeb(Uint8List.fromList(bytes), fileName);

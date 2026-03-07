@@ -36,8 +36,7 @@ class _StudentDashboardState extends State<StudentDashboard>
   double totalHoursWorked = 0.0;
   double thisWeekHours = 0.0;
 
-  // Change to StreamSubscription
-  late StreamSubscription<List<Map<String, dynamic>>>? _activitiesSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _activitiesSubscription;
   List<Map<String, dynamic>> studentActivities = [];
 
   late AnimationController _titleController;
@@ -60,7 +59,6 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
 
     _loadStudentData();
-    // Initialize the real-time listener
     _subscribeToActivities();
   }
 
@@ -68,11 +66,10 @@ class _StudentDashboardState extends State<StudentDashboard>
   void dispose() {
     _titleController.dispose();
     if (timer.isActive) timer.cancel();
-    _activitiesSubscription?.cancel(); // Cancel the subscription safely
+    _activitiesSubscription?.cancel();
     super.dispose();
   }
 
-  // New method to subscribe to live data
   void _subscribeToActivities() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.uid.isEmpty) {
@@ -81,18 +78,13 @@ class _StudentDashboardState extends State<StudentDashboard>
     }
 
     try {
-      // Use FirestoreHelper to get a stream of student's activities
       _activitiesSubscription = FirestoreHelper.getStudentWorkSessionsStream(
         user.uid,
       ).listen(
         (sessions) {
-          // Recalculate totals on every update
           _calculateHours(sessions);
-
-          // Update the main list for the Activity Card
           if (mounted) {
             setState(() {
-              // Sort sessions by timestamp descending (most recent first)
               sessions.sort(
                 (a, b) => (b['submittedAt'] as Timestamp? ?? Timestamp.now())
                     .compareTo(
@@ -105,9 +97,8 @@ class _StudentDashboardState extends State<StudentDashboard>
                       "date": doc['date'] ?? '',
                       "hours": doc['hours'] ?? 0.0,
                       "status": doc['status'] ?? '',
-                      "description":
-                          doc['reportDetails'] ?? '', // Updated field name
-                      "timestamp": doc['submittedAt'], // Updated field name
+                      "description": doc['reportDetails'] ?? '',
+                      "timestamp": doc['submittedAt'],
                     },
                   )
                   .toList();
@@ -115,7 +106,6 @@ class _StudentDashboardState extends State<StudentDashboard>
           }
         },
         onError: (error) {
-          // Handle error
           print("Error fetching activities stream: $error");
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -132,17 +122,15 @@ class _StudentDashboardState extends State<StudentDashboard>
     }
   }
 
-  // Combine hour calculation logic into a single function to be called by both _loadStudentData and _subscribeToActivities
   void _calculateHours(List<Map<String, dynamic>> sessions) {
     double total = 0.0;
     double weekTotal = 0.0;
     final now = DateTime.now();
 
     for (var session in sessions) {
-      final hours = session['hours'] ?? 0.0; // Now it's a number, not string
+      final hours = session['hours'] ?? 0.0;
       total += hours;
 
-      // Calculate week total based on submittedAt timestamp
       final submittedAt = session['submittedAt'] as Timestamp?;
       if (submittedAt != null) {
         final date = submittedAt.toDate();
@@ -165,7 +153,6 @@ class _StudentDashboardState extends State<StudentDashboard>
     if (user == null) return;
 
     try {
-      // Use FirestoreHelper to get user profile
       final userData = await FirestoreHelper.getUserProfile(user.uid);
       if (userData == null) return;
 
@@ -191,7 +178,7 @@ class _StudentDashboardState extends State<StudentDashboard>
       if (mounted) {
         setState(() {
           final duration = DateTime.now().difference(startTime);
-          currentSessionDuration = formatDuration(duration);
+          currentSessionDuration = _formatDuration(duration);
         });
       }
     });
@@ -216,14 +203,13 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
   }
 
-  String formatDuration(Duration duration) {
+  String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
     String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
     return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
   }
 
-  // IMPROVED: Calculate hours with better precision and include student email
   Future<void> handleSubmitHours() async {
     if (comment.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -238,7 +224,6 @@ class _StudentDashboardState extends State<StudentDashboard>
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // Use FirestoreHelper to get user profile
       final userData = await FirestoreHelper.getUserProfile(user.uid);
       if (userData == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -251,31 +236,25 @@ class _StudentDashboardState extends State<StudentDashboard>
 
       final studentDepartment = userData['department'];
       final studentName = userData['name'] ?? "";
-
-      // Get current email (use stored email or Firebase auth email as fallback)
       final currentStudentEmail =
           studentEmail.isNotEmpty ? studentEmail : user.email ?? "";
 
-      // IMPROVED: Calculate hours with better precision from duration
       final parts = currentSessionDuration.split(':');
       double hours = 0.0;
       if (parts.length == 3) {
-        final totalSeconds = (int.parse(parts[0]) * 3600) + // hours to seconds
-            (int.parse(parts[1]) * 60) + // minutes to seconds
-            int.parse(parts[2]); // seconds
-
-        // Convert to hours with 2 decimal places for better precision
+        final totalSeconds = (int.parse(parts[0]) * 3600) +
+            (int.parse(parts[1]) * 60) +
+            int.parse(parts[2]);
         hours = double.parse((totalSeconds / 3600).toStringAsFixed(2));
       }
 
-      // IMPROVED: Save work session with student email and name
       await FirestoreHelper.addWorkSession({
         'studentId': user.uid,
-        'studentName': studentName, // Added student name
-        'studentEmail': currentStudentEmail, // Added student email
+        'studentName': studentName,
+        'studentEmail': currentStudentEmail,
         'department': studentDepartment,
         'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        'hours': hours, // Store as precise decimal number
+        'hours': hours,
         'reportDetails': comment.trim(),
         'status': 'Pending',
         'submittedAt': FieldValue.serverTimestamp(),
@@ -303,41 +282,27 @@ class _StudentDashboardState extends State<StudentDashboard>
     }
   }
 
-  // UPDATED: Professional Excel export with header formatting
   Future<void> exportExcel() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      // Fetch live data for export
       final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
 
       final workbook = excel.Excel.createExcel();
       final sheet = workbook['WorkStudy Report'];
 
-      // Add professional header
-      sheet.appendRow([
-        excel.TextCellValue(""), // Empty cell for logo placeholder
-      ]);
-      sheet.appendRow([
-        excel.TextCellValue("WORKSTUDY"),
-      ]);
-      sheet.appendRow([
-        excel.TextCellValue("Student Report"),
-      ]);
-      sheet.appendRow([
-        excel.TextCellValue("Generated by: $studentEmail"),
-      ]);
-      sheet.appendRow([
-        excel.TextCellValue("Department: $studentDepartment"),
-      ]);
+      sheet.appendRow([excel.TextCellValue("")]);
+      sheet.appendRow([excel.TextCellValue("WORKSTUDY")]);
+      sheet.appendRow([excel.TextCellValue("Student Report")]);
+      sheet.appendRow([excel.TextCellValue("Generated by: $studentEmail")]);
+      sheet.appendRow([excel.TextCellValue("Department: $studentDepartment")]);
       sheet.appendRow([
         excel.TextCellValue(
-            "Date: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}"),
+            "Date: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}")
       ]);
-      sheet.appendRow([]); // Empty row for spacing
+      sheet.appendRow([]);
 
-      // Add table headers
       sheet.appendRow([
         excel.TextCellValue("Date"),
         excel.TextCellValue("Hours"),
@@ -345,7 +310,6 @@ class _StudentDashboardState extends State<StudentDashboard>
         excel.TextCellValue("Description"),
       ]);
 
-      // Add data rows
       for (var session in sessions) {
         sheet.appendRow([
           excel.TextCellValue(session["date"] ?? ''),
@@ -355,8 +319,7 @@ class _StudentDashboardState extends State<StudentDashboard>
         ]);
       }
 
-      // Add summary row
-      sheet.appendRow([]); // Empty row
+      sheet.appendRow([]);
       sheet.appendRow([
         excel.TextCellValue("TOTAL HOURS:"),
         excel.TextCellValue(totalHoursWorked.toStringAsFixed(2)),
@@ -392,18 +355,15 @@ class _StudentDashboardState extends State<StudentDashboard>
     }
   }
 
-  // UPDATED: Professional PDF export with header formatting
   Future<void> exportPDF() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      // Fetch live data for export
       final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
 
       final pdf = pw.Document();
 
-      // Create PDF with professional header
       pdf.addPage(
         pw.Page(
           margin: const pw.EdgeInsets.all(20),
@@ -411,10 +371,8 @@ class _StudentDashboardState extends State<StudentDashboard>
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                // Header Section
                 pw.Row(
                   children: [
-                    // Logo placeholder (blue educational icon)
                     pw.Container(
                       width: 40,
                       height: 40,
@@ -456,10 +414,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     ),
                   ],
                 ),
-
                 pw.SizedBox(height: 15),
-
-                // Report Info
                 pw.Container(
                   width: double.infinity,
                   padding: const pw.EdgeInsets.all(10),
@@ -502,10 +457,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     ],
                   ),
                 ),
-
                 pw.SizedBox(height: 20),
-
-                // Table
                 pw.Text(
                   "Work Sessions",
                   style: pw.TextStyle(
@@ -514,10 +466,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     color: PdfColors.blue800,
                   ),
                 ),
-
                 pw.SizedBox(height: 10),
-
-                // Data Table
                 pw.Table.fromTextArray(
                   border: pw.TableBorder.all(color: PdfColors.grey300),
                   headerStyle: pw.TextStyle(
@@ -548,10 +497,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     ];
                   }).toList(),
                 ),
-
                 pw.SizedBox(height: 15),
-
-                // Summary
                 pw.Container(
                   width: double.infinity,
                   padding: const pw.EdgeInsets.all(10),
@@ -685,19 +631,57 @@ class _StudentDashboardState extends State<StudentDashboard>
                     const SizedBox(height: 10),
                     _fadeSlideIn(
                       delay: 100,
-                      child: Text(
-                        "Hello $ID 👋",
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: primaryColor,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Hello $ID 👋",
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: primaryColor,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(Icons.business, size: 16, color: Colors.white70),
+                              const SizedBox(width: 4),
+                              Text(
+                                "Department: ",
+                                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                              ),
+                              Text(
+                                studentDepartment.isEmpty ? "Loading..." : studentDepartment,
+                                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(Icons.email, size: 16, color: Colors.white70),
+                              const SizedBox(width: 4),
+                              Text(
+                                "Email: ",
+                                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  studentEmail.isEmpty ? "Loading..." : studentEmail,
+                                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            "Ready to track your work hours today?",
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      "Ready to track your work hours today?",
-                      style: TextStyle(color: Colors.white70),
                     ),
                     const SizedBox(height: 20),
                     Row(
@@ -894,7 +878,6 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
   }
 
-  // Helper method to calculate current hours for display
   String _calculateCurrentHours() {
     final parts = currentSessionDuration.split(':');
     if (parts.length == 3) {
@@ -972,7 +955,6 @@ class _StudentDashboardState extends State<StudentDashboard>
   }
 
   Widget _buildActivityCard(Color primaryColor, Color accentColor) {
-    // Uses the new `studentActivities` list which is updated via the stream
     List<Map<String, dynamic>> filteredActivities = studentActivities
         .where((activity) =>
             activity["status"]?.toLowerCase() == selectedActivityTab)
