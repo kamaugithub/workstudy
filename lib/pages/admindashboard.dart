@@ -1529,6 +1529,15 @@ class _AdminDashboardState extends State<AdminDashboard>
       }).toList();
 
       print('✅ Users: ${users.length}, Sessions: ${sessions.length}');
+      
+      // Print first few users for verification
+      if (users.isNotEmpty) {
+        print('📧 First 3 users for PDF:');
+        users.take(3).forEach((user) {
+          print('   - Email: ${user['email']}, ID: ${user['idNumber']}');
+        });
+      }
+      
       return [
         {'type': 'users', 'data': users},
         {'type': 'work_sessions', 'data': sessions},
@@ -1594,7 +1603,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                     ),
                   ),
                   pw.SizedBox(height: 20),
-                  // FIXED: replaced en dash (U+2013) with regular hyphen (U+002D)
                   pw.Text(
                     'Generated: ${DateFormat('EEEE, MMMM d, yyyy - h:mm a').format(DateTime.now())}',
                     style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700),
@@ -1626,80 +1634,167 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
         );
 
-        // Users Section
+        // Users Section - IMPROVED to ensure data displays properly
         final usersData = reportData.firstWhere((s) => s['type'] == 'users')['data'] as List<Map<String, dynamic>>;
         print('📄 PDF Users data length: ${usersData.length}'); // DIAGNOSTIC
-        if (usersData.isNotEmpty) {
-          // Print first user for verification
-          print('📄 First user: ${usersData.first}');
-          pdf.addPage(
-            pw.Page(
-              pageFormat: PdfPageFormat.a4,
-              build: (context) {
-                return _buildDataTable(
-                  title: 'Users',
-                  data: usersData,
-                  columns: const ['Email', 'Role', 'Status', 'Department', 'ID Number', 'Created'],
-                  rowBuilder: (user) => [
-                    user['email'] ?? '',
-                    user['role'] ?? '',
-                    user['status'] ?? '',
-                    user['department'] ?? '',
-                    user['idNumber'] ?? '',
-                    user['createdAt'] ?? '',
-                  ],
+        
+        // Always add Users page, even if empty (with message)
+        pdf.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat.a4,
+            build: (context) {
+              if (usersData.isEmpty) {
+                return pw.Center(
+                  child: pw.Column(
+                    mainAxisAlignment: pw.MainAxisAlignment.center,
+                    children: [
+                      pw.Icon(pw.IconData(0x26A0), size: 50), // Warning sign
+                      pw.SizedBox(height: 20),
+                      pw.Text(
+                        'No user data available.',
+                        style: const pw.TextStyle(fontSize: 16, color: PdfColors.red),
+                      ),
+                    ],
+                  ),
                 );
-              },
-            ),
-          );
-        } else {
-          pdf.addPage(
-            pw.Page(
-              pageFormat: PdfPageFormat.a4,
-              build: (context) => pw.Center(
-                child: pw.Text('No user data available.', style: const pw.TextStyle(fontSize: 16)),
-              ),
-            ),
-          );
-        }
+              }
+              
+              // Build users table with all data
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        'Users',
+                        style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
+                      ),
+                      pw.Container(
+                        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.blue50,
+                          borderRadius: pw.BorderRadius.circular(5),
+                        ),
+                        child: pw.Text(
+                          'Total: ${usersData.length}',
+                          style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 20),
+                  pw.TableHelper.fromTextArray(
+                    border: pw.TableBorder.all(color: PdfColors.grey300),
+                    headerStyle: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
+                      fontSize: 10,
+                    ),
+                    headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
+                    cellStyle: const pw.TextStyle(fontSize: 8),
+                    cellAlignments: {
+                      0: pw.Alignment.centerLeft,
+                      1: pw.Alignment.centerLeft,
+                      2: pw.Alignment.centerLeft,
+                      3: pw.Alignment.centerLeft,
+                    },
+                    headers: const ['Email', 'Role', 'Status', 'ID Number'],
+                    data: usersData.map((user) {
+                      return [
+                        user['email'] ?? '',
+                        user['role'] ?? '',
+                        user['status'] ?? '',
+                        user['idNumber'] ?? '',
+                      ];
+                    }).toList(),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
 
         // Work Sessions Section
         final sessionsData = reportData.firstWhere((s) => s['type'] == 'work_sessions')['data'] as List<Map<String, dynamic>>;
         print('📄 PDF Sessions data length: ${sessionsData.length}'); // DIAGNOSTIC
-        if (sessionsData.isNotEmpty) {
-          // Print first session for verification
-          print('📄 First session: ${sessionsData.first}');
-          pdf.addPage(
-            pw.Page(
-              pageFormat: PdfPageFormat.a4,
-              build: (context) {
-                return _buildDataTable(
-                  title: 'Work Sessions',
-                  data: sessionsData,
-                  columns: const ['Student Email', 'Student Name', 'Hours', 'Status', 'Date', 'Department', 'Submitted'],
-                  rowBuilder: (session) => [
-                    session['studentEmail'] ?? '',
-                    session['studentName'] ?? '',
-                    formatNumber(session['hours']),
-                    session['status'] ?? '',
-                    session['date'] ?? '',
-                    session['department'] ?? '',
-                    session['submittedAt'] ?? '',
-                  ],
+        
+        pdf.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat.a4,
+            build: (context) {
+              if (sessionsData.isEmpty) {
+                return pw.Center(
+                  child: pw.Column(
+                    mainAxisAlignment: pw.MainAxisAlignment.center,
+                    children: [
+                      pw.Icon(pw.IconData(0x1F4CA), size: 50), // Bar chart
+                      pw.SizedBox(height: 20),
+                      pw.Text(
+                        'No work session data available.',
+                        style: const pw.TextStyle(fontSize: 16, color: PdfColors.grey),
+                      ),
+                    ],
+                  ),
                 );
-              },
-            ),
-          );
-        } else {
-          pdf.addPage(
-            pw.Page(
-              pageFormat: PdfPageFormat.a4,
-              build: (context) => pw.Center(
-                child: pw.Text('No work session data available.', style: const pw.TextStyle(fontSize: 16)),
-              ),
-            ),
-          );
-        }
+              }
+              
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        'Work Sessions',
+                        style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
+                      ),
+                      pw.Container(
+                        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.blue50,
+                          borderRadius: pw.BorderRadius.circular(5),
+                        ),
+                        child: pw.Text(
+                          'Total: ${sessionsData.length}',
+                          style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 20),
+                  pw.TableHelper.fromTextArray(
+                    border: pw.TableBorder.all(color: PdfColors.grey300),
+                    headerStyle: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
+                      fontSize: 9,
+                    ),
+                    headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
+                    cellStyle: const pw.TextStyle(fontSize: 7),
+                    cellAlignments: {
+                      0: pw.Alignment.centerLeft,
+                      1: pw.Alignment.centerLeft,
+                      2: pw.Alignment.centerRight,
+                      3: pw.Alignment.centerLeft,
+                      4: pw.Alignment.centerLeft,
+                    },
+                    headers: const ['Student Email', 'Student Name', 'Hours', 'Status', 'Date'],
+                    data: sessionsData.map((session) {
+                      return [
+                        session['studentEmail'] ?? '',
+                        session['studentName'] ?? '',
+                        formatNumber(session['hours']),
+                        session['status'] ?? '',
+                        session['date'] ?? '',
+                      ];
+                    }).toList(),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
 
         final bytes = await pdf.save();
         final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf";
@@ -1718,7 +1813,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     });
   }
 
-  // Helper to build a consistent data table for PDF
+  // Helper to build a consistent data table for PDF (keeping for backward compatibility)
   pw.Widget _buildDataTable({
     required String title,
     required List<Map<String, dynamic>> data,
