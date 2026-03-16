@@ -58,6 +58,11 @@ class _AdminDashboardState extends State<AdminDashboard>
   List<Map<String, dynamic>> _pendingActivities = [];
   List<Map<String, dynamic>> _approvedActivities = [];
 
+  // ========== NEW SIMPLIFIED FILTER VARIABLES ==========
+  String _selectedUserType = 'All'; // 'All', 'Students', 'Supervisors'
+  String _departmentFilter = 'All';
+  List<String> _availableDepartments = [];
+
   @override
   void initState() {
     super.initState();
@@ -82,7 +87,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     super.dispose();
   }
 
-  // --- MAIN DATA LOADING METHOD --- with DEBUG LOGS
+  // --- MAIN DATA LOADING METHOD ---
   Future<void> _loadAllData() async {
     if (_isRefreshing) return;
 
@@ -91,90 +96,92 @@ class _AdminDashboardState extends State<AdminDashboard>
       _isRefreshing = true;
     });
 
-    print('🔄 ===== STARTING DATA LOAD =====');
-
     try {
       await Future.wait([
         _loadDashboardStats(),
         _loadReportStats(),
         _loadEmailLists(),
+        _loadDepartments(),
       ]);
       _lastRefreshTime = DateTime.now();
-      print('✅ All data loaded successfully at $_lastRefreshTime');
     } catch (e) {
-      print('❌ Error loading all data: $e');
       _showSnack("Error loading dashboard data: $e");
     } finally {
       setState(() {
         isLoading = false;
         _isRefreshing = false;
       });
-      print('🔄 ===== DATA LOAD COMPLETE =====');
     }
   }
 
-  // Helper method to extract hours from various possible field names
+  // ========== LOAD UNIQUE DEPARTMENTS FOR FILTER ==========
+  Future<void> _loadDepartments() async {
+    try {
+      final users = await _firestore.collection('users').get();
+      Set<String> departments = {};
+      
+      for (var doc in users.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final dept = data['department']?.toString();
+        if (dept != null && dept.isNotEmpty) {
+          departments.add(dept);
+        }
+      }
+      
+      setState(() {
+        _availableDepartments = departments.toList()..sort();
+      });
+    } catch (e) {
+      print('Error loading departments: $e');
+    }
+  }
+
+  // Helper method to extract hours
   double _extractHours(Map<String, dynamic> data) {
-    // Try different possible field names
     List<String> possibleFields = ['hours', 'hour', 'totalHours', 'approvedHours', 'workHours', 'duration'];
     
     for (var field in possibleFields) {
       if (data.containsKey(field)) {
         final value = data[field];
         if (value != null) {
-          if (value is int) {
-            return value.toDouble();
-          } else if (value is double) {
-            return value;
-          } else if (value is String) {
+          if (value is int) return value.toDouble();
+          if (value is double) return value;
+          if (value is String) {
             final parsed = double.tryParse(value);
             if (parsed != null) return parsed;
-          } else if (value is num) {
-            return value.toDouble();
           }
+          if (value is num) return value.toDouble();
         }
       }
     }
     return 0.0;
   }
 
-  // --- REFRESH DATA WITH DEBOUNCING ---
   Future<void> _refreshData() async {
     if (_isRefreshing) return;
     await _loadAllData();
     _showSnack("Dashboard data refreshed!", color: Colors.green);
   }
 
-  // --- TIMESTAMP UTILITY FUNCTIONS ---
-
-  /// Converts any timestamp format to DateTime
   DateTime? parseAnyTimestamp(dynamic timestamp) {
     if (timestamp == null) return null;
-
     try {
-      if (timestamp is Timestamp) {
-        return timestamp.toDate();
-      } else if (timestamp is int) {
-        return DateTime.fromMillisecondsSinceEpoch(timestamp);
-      } else if (timestamp is String) {
-        return DateTime.tryParse(timestamp);
-      } else if (timestamp is DateTime) {
-        return timestamp;
-      }
+      if (timestamp is Timestamp) return timestamp.toDate();
+      if (timestamp is int) return DateTime.fromMillisecondsSinceEpoch(timestamp);
+      if (timestamp is String) return DateTime.tryParse(timestamp);
+      if (timestamp is DateTime) return timestamp;
     } catch (e) {
       print('Error parsing timestamp: $e');
     }
     return null;
   }
 
-  /// Formats timestamp to readable format
   String formatTimestamp(dynamic timestamp) {
     final dateTime = parseAnyTimestamp(timestamp);
     if (dateTime == null) return 'Date not available';
     return DateFormat('EEEE, MMMM d, yyyy h:mm:ss a').format(dateTime);
   }
 
-  /// Formats timestamp for export files
   String formatTimestampForExport(dynamic timestamp) {
     final dateTime = parseAnyTimestamp(timestamp);
     if (dateTime == null) return 'N/A';
@@ -182,102 +189,57 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   // ============================================================
-  // FIXED: Load dashboard statistics - Counts ALL case variations
-  // Now properly counts "student", "Student", "supervisor", "Supervisor"
+  // Load dashboard statistics - Counts ALL case variations
   // ============================================================
   Future<void> _loadDashboardStats() async {
     try {
-      // Add a small delay to allow Firestore to settle after writes
       await Future.delayed(const Duration(milliseconds: 500));
       
-      print('📊 Loading dashboard stats...');
-
-      // Fetch all users to get counts
       final allUsers = await _firestore.collection('users').get();
-      print('👥 Total users in database: ${allUsers.docs.length}');
 
       int totalStudents = 0;
       int totalSupervisors = 0;
       int pendingApprovals = 0;
       int otherUsers = 0;
 
-      // Track role variations for debugging
-      Map<String, int> roleVariations = {};
-
       for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
         final originalRole = data['role']?.toString() ?? '';
-        final role = originalRole.toLowerCase(); // Convert to lowercase for comparison
+        final role = originalRole.toLowerCase();
         final status = data['status']?.toString()?.toLowerCase() ?? '';
 
-        // Count role variations for debugging
-        roleVariations[originalRole] = (roleVariations[originalRole] ?? 0) + 1;
-
-        print('   - User: ${data['email']}, Original Role: "$originalRole", Lowercase: "$role", Status: $status');
-
-        // Check if it's a student (case insensitive)
         if (role == 'student') {
           totalStudents++;
           if (status == 'pending') pendingApprovals++;
-        } 
-        // Check if it's a supervisor (case insensitive)
-        else if (role == 'supervisor') {
+        } else if (role == 'supervisor') {
           totalSupervisors++;
           if (status == 'pending') pendingApprovals++;
-        } 
-        // Check if it's admin (case insensitive)
-        else if (role == 'admin') {
-          otherUsers++;
-          if (status == 'pending') pendingApprovals++;
-        }
-        // Any other role
-        else {
+        } else {
           otherUsers++;
           if (status == 'pending') pendingApprovals++;
         }
       }
-
-      print('📈 Role variations found:');
-      roleVariations.forEach((role, count) {
-        print('   - "$role": $count users');
-      });
-
-      print('📈 Calculated stats:');
-      print('- Total Students (all): $totalStudents');
-      print('- Total Supervisors (all): $totalSupervisors');
-      print('- Other Users: $otherUsers');
-      print('- Pending Approvals: $pendingApprovals');
 
       setState(() {
         stats = {
           "totalStudents": totalStudents,
           "totalSupervisors": totalSupervisors,
           "pendingApprovals": pendingApprovals,
-          "totalHoursApproved": stats["totalHoursApproved"], // Keep existing hours
+          "totalHoursApproved": stats["totalHoursApproved"],
           "totalUsers": allUsers.docs.length,
         };
       });
       
-      // Now load hours separately
       await _loadApprovedHours();
       
-      print('✅ Dashboard stats updated');
-      print('   - Students: $totalStudents');
-      print('   - Supervisors: $totalSupervisors');
-      print('   - Pending: $pendingApprovals');
-      print('   - Total Users: ${allUsers.docs.length}');
     } catch (e) {
       print('❌ Error loading dashboard stats: $e');
       _showSnack('Error loading stats: $e');
     }
   }
 
-  // Separate method to load approved hours
   Future<void> _loadApprovedHours() async {
     try {
-      print('🔍 Fetching approved work sessions...');
-      
-      // Query with case-insensitive approach
       final allSessions = await _firestore.collection('work_sessions').get();
       
       double totalHoursApproved = 0.0;
@@ -287,30 +249,11 @@ class _AdminDashboardState extends State<AdminDashboard>
         final data = session.data() as Map<String, dynamic>;
         final status = data['status']?.toString().toLowerCase() ?? '';
         
-        // Check for approved status regardless of case
         if (status == 'approved') {
           approvedCount++;
-          final hours = data['hours'];
-          
-          double hourValue = 0.0;
-          if (hours != null) {
-            if (hours is int) {
-              hourValue = hours.toDouble();
-            } else if (hours is double) {
-              hourValue = hours;
-            } else if (hours is String) {
-              hourValue = double.tryParse(hours) ?? 0.0;
-            } else if (hours is num) {
-              hourValue = hours.toDouble();
-            }
-            
-            totalHoursApproved += hourValue;
-          }
+          totalHoursApproved += _extractHours(data);
         }
       }
-      
-      print('📊 Approved work sessions found: $approvedCount');
-      print('📊 Total hours approved: $totalHoursApproved');
       
       setState(() {
         stats["totalHoursApproved"] = totalHoursApproved;
@@ -321,18 +264,11 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // Load report statistics - FIXED with case-insensitive approach
   Future<void> _loadReportStats() async {
     try {
       final now = DateTime.now();
-      final currentMonthStart = DateTime(now.year, now.month, 1);
       final lastMonthStart = DateTime(now.year, now.month - 1, 1);
 
-      print('📅 Loading report stats for:');
-      print('   - Current month: ${now.year}-${now.month}');
-      print('   - Last month: ${lastMonthStart.year}-${lastMonthStart.month}');
-
-      // Fetch ALL approved work sessions with case-insensitive approach
       final allSessions = await _firestore.collection('work_sessions').get();
 
       double thisMonthHours = 0.0;
@@ -344,38 +280,24 @@ class _AdminDashboardState extends State<AdminDashboard>
         final data = session.data() as Map<String, dynamic>;
         final status = data['status']?.toString().toLowerCase() ?? '';
         
-        // Only count approved sessions
         if (status == 'approved') {
           final submittedAt = parseAnyTimestamp(data['submittedAt']);
-          final hours = data['hours'];
-          final studentEmail = data['studentEmail'];
+          final hours = _extractHours(data);
 
-          if (submittedAt != null && hours != null) {
-            double hourValue = 0.0;
-            if (hours is int) hourValue = hours.toDouble();
-            else if (hours is double) hourValue = hours;
-            else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
-            else if (hours is num) hourValue = hours.toDouble();
-
-            // Check if this month
+          if (submittedAt != null && hours > 0) {
             if (submittedAt.year == now.year && submittedAt.month == now.month) {
-              thisMonthHours += hourValue;
+              thisMonthHours += hours;
               thisMonthCount++;
-            }
-            // Check if last month
-            else if (submittedAt.year == lastMonthStart.year &&
+            } else if (submittedAt.year == lastMonthStart.year &&
                 submittedAt.month == lastMonthStart.month) {
-              lastMonthHours += hourValue;
+              lastMonthHours += hours;
               lastMonthCount++;
             }
           }
         }
       }
 
-      // Get total active students (with approved status) - case insensitive
-      final allStudents = await _firestore
-          .collection('users')
-          .get();
+      final allStudents = await _firestore.collection('users').get();
       
       int totalActiveStudents = 0;
       for (var student in allStudents.docs) {
@@ -387,15 +309,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         }
       }
 
-      final avgHours = totalActiveStudents > 0
-          ? (thisMonthHours / totalActiveStudents)
-          : 0.0;
-
-      print('📊 Calculated report stats:');
-      print('- This month hours: $thisMonthHours (from $thisMonthCount sessions)');
-      print('- Last month hours: $lastMonthHours (from $lastMonthCount sessions)');
-      print('- Active students: $totalActiveStudents');
-      print('- Avg hours/student: $avgHours');
+      final avgHours = totalActiveStudents > 0 ? (thisMonthHours / totalActiveStudents) : 0.0;
 
       setState(() {
         reportStats = {
@@ -408,24 +322,11 @@ class _AdminDashboardState extends State<AdminDashboard>
       });
     } catch (e) {
       print('❌ Error loading report stats: $e');
-      setState(() {
-        reportStats = {
-          "thisMonthHours": 0.0,
-          "lastMonthHours": 0.0,
-          "avgHoursPerStudent": 0.0,
-          "thisMonthCount": 0,
-          "lastMonthCount": 0,
-        };
-      });
     }
   }
 
-  // Load email lists for clickable cards - FIXED with case-insensitive role matching
   Future<void> _loadEmailLists() async {
     try {
-      print('📧 Loading email lists...');
-
-      // Load ALL students (regardless of status) - case insensitive
       final allUsers = await _firestore.collection('users').get();
       
       _studentsEmails = [];
@@ -443,12 +344,6 @@ class _AdminDashboardState extends State<AdminDashboard>
         }
       }
 
-      print('🎓 All students found: ${_studentsEmails.length}');
-      print('👨‍🏫 All supervisors found: ${_supervisorsEmails.length}');
-
-      // Load ALL pending users - case insensitive
-      print('⏳ Checking all users for pending status...');
-      
       _pendingActivities = [];
       for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
@@ -465,11 +360,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           });
         }
       }
-      
-      print('⏳ Pending users found: ${_pendingActivities.length}');
 
-      // Load approved activities for hours calculation - case insensitive
-      print('✅ Loading approved work sessions for card details...');
       final allSessions = await _firestore.collection('work_sessions').get();
       
       _approvedActivities = [];
@@ -478,19 +369,9 @@ class _AdminDashboardState extends State<AdminDashboard>
         final status = data['status']?.toString().toLowerCase() ?? '';
         
         if (status == 'approved') {
-          final hours = data['hours'];
-          double hourValue = 0.0;
-          
-          if (hours != null) {
-            if (hours is int) hourValue = hours.toDouble();
-            else if (hours is double) hourValue = hours;
-            else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
-            else if (hours is num) hourValue = hours.toDouble();
-          }
-          
           _approvedActivities.add({
             'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
-            'hours': hourValue,
+            'hours': _extractHours(data),
             'date': data['date']?.toString() ?? 'No date',
             'studentName': data['studentName']?.toString() ?? 'Unknown',
             'department': data['department']?.toString() ?? 'Unknown',
@@ -498,25 +379,582 @@ class _AdminDashboardState extends State<AdminDashboard>
           });
         }
       }
-
-      print('✅ Approved work sessions: ${_approvedActivities.length}');
-      
-      print('📊 Summary:');
-      print('- Students (all): ${_studentsEmails.length}');
-      print('- Supervisors (all): ${_supervisorsEmails.length}');
-      print('- Pending users: ${_pendingActivities.length}');
-      print('- Approved sessions: ${_approvedActivities.length}');
       
     } catch (e) {
       print('❌ Error loading email lists: $e');
-      _studentsEmails = [];
-      _supervisorsEmails = [];
-      _pendingActivities = [];
-      _approvedActivities = [];
     }
   }
 
-  // Show modal for card details
+  // ========== ID VALIDATION FUNCTION ==========
+  bool _isValidIdNumber(String idNumber) {
+    if (idNumber.isEmpty) return false;
+    // Check if it contains only digits and length is between 6 and 14
+    final regex = RegExp(r'^\d{6,14}$');
+    return regex.hasMatch(idNumber);
+  }
+
+  // ========== SIMPLIFIED EXPORT FILTER DIALOG ==========
+  Future<void> _showExportFilterDialog() async {
+    String tempUserType = _selectedUserType;
+    String tempDepartment = _departmentFilter;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Export Filters'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('User Type', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: tempUserType,
+                        isExpanded: true,
+                        items: const [
+                          DropdownMenuItem(value: 'All', child: Text('All Users')),
+                          DropdownMenuItem(value: 'Students', child: Text('Students Only')),
+                          DropdownMenuItem(value: 'Supervisors', child: Text('Supervisors Only')),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => tempUserType = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  const Text('Department', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: tempDepartment,
+                        isExpanded: true,
+                        items: [
+                          const DropdownMenuItem(
+                            value: 'All',
+                            child: Text('All Departments'),
+                          ),
+                          ..._availableDepartments.map((dept) => DropdownMenuItem(
+                            value: dept,
+                            child: Text(dept),
+                          )),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => tempDepartment = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _selectedUserType = tempUserType;
+                    _departmentFilter = tempDepartment;
+                  });
+                  Navigator.pop(context);
+                  _showExportOptions();
+                },
+                child: const Text('Apply Filters'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showExportOptions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Export Report',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _getFilterDescription(),
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _exportWithFilters('PDF'),
+                    icon: const Icon(Icons.picture_as_pdf),
+                    label: const Text('PDF'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _exportWithFilters('Excel'),
+                    icon: const Icon(Icons.table_chart),
+                    label: const Text('Excel'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _showExportFilterDialog();
+              },
+              child: const Text('Adjust Filters'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getFilterDescription() {
+    List<String> filters = [];
+    if (_selectedUserType != 'All') {
+      filters.add(_selectedUserType);
+    }
+    if (_departmentFilter != 'All') {
+      filters.add('Dept: $_departmentFilter');
+    }
+    return filters.isEmpty ? 'No filters applied' : filters.join(' • ');
+  }
+
+  // ========== SIMPLIFIED DATA FETCHING WITH NULL SAFETY ==========
+  Future<Map<String, dynamic>> _fetchFilteredData() async {
+    try {
+      // Build users query with department filter if needed
+      Query usersQuery = _firestore.collection('users');
+      
+      if (_departmentFilter != 'All') {
+        usersQuery = usersQuery.where('department', isEqualTo: _departmentFilter);
+      }
+      
+      final usersSnapshot = await usersQuery.get();
+      
+      // Filter by user type in code (since we can't have two where clauses without index)
+      List<Map<String, dynamic>> users = [];
+      for (var doc in usersSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final role = data['role']?.toString().toLowerCase() ?? '';
+        
+        bool includeUser = true;
+        if (_selectedUserType == 'Students') {
+          includeUser = role == 'student';
+        } else if (_selectedUserType == 'Supervisors') {
+          includeUser = role == 'supervisor';
+        }
+        
+        if (includeUser) {
+          users.add({
+            'id': doc.id,
+            'email': data['email']?.toString() ?? '',
+            'role': data['role']?.toString() ?? '',
+            'status': data['status']?.toString() ?? '',
+            'department': data['department']?.toString() ?? '',
+            'idNumber': data['idNumber']?.toString() ?? '',
+            'name': data['name']?.toString() ?? '',
+            'createdAt': formatTimestampForExport(data['createdAt']),
+          });
+        }
+      }
+
+      // Build sessions query with department filter if needed
+      Query sessionsQuery = _firestore.collection('work_sessions');
+      
+      if (_departmentFilter != 'All') {
+        sessionsQuery = sessionsQuery.where('department', isEqualTo: _departmentFilter);
+      }
+      
+      final sessionsSnapshot = await sessionsQuery.get();
+      
+      List<Map<String, dynamic>> sessions = [];
+      for (var doc in sessionsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        
+        sessions.add({
+          'id': doc.id,
+          'studentId': data['studentId']?.toString() ?? '',
+          'studentEmail': data['studentEmail']?.toString() ?? '',
+          'hours': _extractHours(data),
+          'status': data['status']?.toString() ?? '',
+          'reportDetails': data['reportDetails']?.toString() ?? '',
+          'date': data['date']?.toString() ?? '',
+          'department': data['department']?.toString() ?? '',
+          'submittedAt': formatTimestampForExport(data['submittedAt']),
+        });
+      }
+
+      return {
+        'users': users,
+        'sessions': sessions,
+        'totalUsers': users.length,
+        'totalSessions': sessions.length,
+        'totalHours': sessions.fold(0.0, (sum, s) => sum + (s['hours'] as double)),
+      };
+    } catch (e) {
+      print('❌ Error fetching filtered data: $e');
+      throw Exception('Failed to fetch report data: $e');
+    }
+  }
+
+  Future<void> _exportWithFilters(String format) async {
+    await _showLoadingEffect(() async {
+      try {
+        final data = await _fetchFilteredData();
+        
+        if (format == 'PDF') {
+          await _generatePDF(data);
+        } else {
+          await _generateExcel(data);
+        }
+        
+        _showSnack("✅ $format report generated with filters", color: Colors.green);
+      } catch (e) {
+        print('❌ Export error: $e');
+        _showSnack("Export failed: $e");
+      }
+    });
+  }
+
+  // --- PDF Generation with Filters (REMOVED Student Name column) ---
+  Future<void> _generatePDF(Map<String, dynamic> data) async {
+    final pdf = pw.Document();
+
+    String formatNumber(dynamic value, {int decimals = 2}) {
+      if (value == null) return '0.00';
+      if (value is num) return value.toStringAsFixed(decimals);
+      return value.toString();
+    }
+
+    // Cover Page
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (context) => pw.Center(
+          child: pw.Column(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            children: [
+              pw.Container(
+                width: 100,
+                height: 100,
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.blue700,
+                  shape: pw.BoxShape.circle,
+                ),
+                child: pw.Center(
+                  child: pw.Text(
+                    'WS',
+                    style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 40,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 30),
+              pw.Text(
+                'WorkStudy Admin Report',
+                style: pw.TextStyle(
+                  fontSize: 28,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.blue800,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                _getFilterDescription(),
+                style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey600),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Text(
+                'Generated: ${DateFormat('EEEE, MMMM d, yyyy - h:mm a').format(DateTime.now())}',
+                style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700),
+              ),
+              pw.SizedBox(height: 40),
+              pw.Container(
+                width: 400,
+                padding: const pw.EdgeInsets.all(20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.blue50,
+                  borderRadius: pw.BorderRadius.circular(10),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    _buildPdfSummaryRow('Total Users', '${data['totalUsers']}'),
+                    _buildPdfSummaryRow('Total Sessions', '${data['totalSessions']}'),
+                    _buildPdfSummaryRow('Total Hours', '${formatNumber(data['totalHours'])} h'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Users Section
+    final users = data['users'] as List;
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (context) {
+          if (users.isEmpty) {
+            return pw.Center(
+              child: pw.Text('No user data available.', style: const pw.TextStyle(fontSize: 16)),
+            );
+          }
+          
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Users',
+                    style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
+                  ),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.blue50,
+                      borderRadius: pw.BorderRadius.circular(5),
+                    ),
+                    child: pw.Text(
+                      'Total: ${users.length}',
+                      style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+              pw.TableHelper.fromTextArray(
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+                headerStyle: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white,
+                  fontSize: 10,
+                ),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
+                cellStyle: const pw.TextStyle(fontSize: 8),
+                headers: const ['Email', 'Role', 'Status', 'Department', 'ID Number'],
+                data: users.map((user) {
+                  return [
+                    user['email'] ?? '',
+                    user['role'] ?? '',
+                    user['status'] ?? '',
+                    user['department'] ?? '',
+                    user['idNumber'] ?? '',
+                  ];
+                }).toList(),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    // Work Sessions Section - REMOVED Student Name column
+    final sessions = data['sessions'] as List;
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (context) {
+          if (sessions.isEmpty) {
+            return pw.Center(
+              child: pw.Text('No work session data available.', style: const pw.TextStyle(fontSize: 16)),
+            );
+          }
+          
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Work Sessions',
+                    style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
+                  ),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.blue50,
+                      borderRadius: pw.BorderRadius.circular(5),
+                    ),
+                    child: pw.Text(
+                      'Total: ${sessions.length}',
+                      style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+              pw.TableHelper.fromTextArray(
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+                headerStyle: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white,
+                  fontSize: 9,
+                ),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
+                cellStyle: const pw.TextStyle(fontSize: 7),
+                headers: const ['Student Email', 'Hours', 'Status', 'Date', 'Department'],
+                data: sessions.map((session) {
+                  return [
+                    session['studentEmail'] ?? '',
+                    formatNumber(session['hours']),
+                    session['status'] ?? '',
+                    session['date'] ?? '',
+                    session['department'] ?? '',
+                  ];
+                }).toList(),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    final bytes = await pdf.save();
+    final fileName = "workstudy_report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf";
+
+    if (kIsWeb) {
+      saveFileWeb(bytes, fileName);
+    } else {
+      await saveFileOther(bytes, fileName);
+    }
+  }
+
+  // --- PDF Helper Row (RENAMED to avoid conflict) ---
+  pw.Widget _buildPdfSummaryRow(String label, String value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label, style: const pw.TextStyle(fontSize: 12)),
+          pw.Text(value, style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  // --- Excel Generation with Filters (REMOVED Student Name column) ---
+  Future<void> _generateExcel(Map<String, dynamic> data) async {
+    final workbook = excel.Excel.createExcel();
+
+    String formatNumber(dynamic value, {int decimals = 2}) {
+      if (value == null) return '0.00';
+      if (value is num) return value.toStringAsFixed(decimals);
+      return value.toString();
+    }
+
+    // Dashboard Sheet
+    final dashboardSheet = workbook['Dashboard'];
+    dashboardSheet.appendRow([excel.TextCellValue('WorkStudy Admin Report')]);
+    dashboardSheet.appendRow([excel.TextCellValue('Generated: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}')]);
+    dashboardSheet.appendRow([excel.TextCellValue('Filters: ${_getFilterDescription()}')]);
+    dashboardSheet.appendRow([]);
+    dashboardSheet.appendRow([excel.TextCellValue('Summary'), excel.TextCellValue('')]);
+    dashboardSheet.appendRow([excel.TextCellValue('Total Users'), excel.TextCellValue('${data['totalUsers']}')]);
+    dashboardSheet.appendRow([excel.TextCellValue('Total Sessions'), excel.TextCellValue('${data['totalSessions']}')]);
+    dashboardSheet.appendRow([excel.TextCellValue('Total Hours'), excel.TextCellValue(formatNumber(data['totalHours']))]);
+
+    // Users Sheet
+    final users = data['users'] as List;
+    final usersSheet = workbook['Users'];
+    if (users.isNotEmpty) {
+      final headers = ['Email', 'Role', 'Status', 'Department', 'ID Number'];
+      usersSheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
+      for (var user in users) {
+        usersSheet.appendRow([
+          excel.TextCellValue(user['email'] ?? ''),
+          excel.TextCellValue(user['role'] ?? ''),
+          excel.TextCellValue(user['status'] ?? ''),
+          excel.TextCellValue(user['department'] ?? ''),
+          excel.TextCellValue(user['idNumber'] ?? ''),
+        ]);
+      }
+    }
+
+    // Work Sessions Sheet - REMOVED Student Name column
+    final sessions = data['sessions'] as List;
+    final sessionsSheet = workbook['Work Sessions'];
+    if (sessions.isNotEmpty) {
+      final headers = ['Student Email', 'Hours', 'Status', 'Date', 'Department'];
+      sessionsSheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
+      for (var session in sessions) {
+        sessionsSheet.appendRow([
+          excel.TextCellValue(session['studentEmail'] ?? ''),
+          excel.TextCellValue(formatNumber(session['hours'])),
+          excel.TextCellValue(session['status'] ?? ''),
+          excel.TextCellValue(session['date'] ?? ''),
+          excel.TextCellValue(session['department'] ?? ''),
+        ]);
+      }
+    }
+
+    final bytes = workbook.save();
+    if (bytes == null) throw Exception('Failed to generate Excel file');
+
+    final fileName = "workstudy_report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.xlsx";
+
+    if (kIsWeb) {
+      saveFileWeb(Uint8List.fromList(bytes), fileName);
+    } else {
+      await saveFileOther(Uint8List.fromList(bytes), fileName);
+    }
+  }
+
   void _showCardDetails(String cardType) {
     final Map<String, dynamic> cardData = {
       'title': '',
@@ -551,59 +989,50 @@ class _AdminDashboardState extends State<AdminDashboard>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.8,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(20),
-              topRight: Radius.circular(20),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.2),
-                blurRadius: 10,
-                spreadRadius: 2,
-              ),
-            ],
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.8,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
           ),
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: cardData['color'],
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    topRight: Radius.circular(20),
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: cardData['color'],
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    cardData['title'],
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      cardData['title'],
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
               ),
-              Expanded(
-                child: _buildCardContent(cardType, cardData['data'], cardData['color']),
-              ),
-            ],
-          ),
-        );
-      },
+            ),
+            Expanded(
+              child: _buildCardContent(cardType, cardData['data'], cardData['color']),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -672,14 +1101,18 @@ class _AdminDashboardState extends State<AdminDashboard>
                 backgroundColor: color.withOpacity(0.1),
                 child: Icon(Icons.person_add, color: color),
               ),
-              title: Text(user['email'] ?? 'No email', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              title: Text(user['email']?.toString() ?? 'No email', 
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 4),
-                  Text('ID: ${user['idNumber'] ?? 'No ID'}', style: TextStyle(fontSize: 13, color: Colors.grey[700])),
-                  Text('Department: ${user['department'] ?? 'No department'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  Text('Role: ${user['role'] ?? 'Unknown'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  Text('ID: ${user['idNumber']?.toString() ?? 'No ID'}', 
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                  Text('Department: ${user['department']?.toString() ?? 'No department'}', 
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  Text('Role: ${user['role']?.toString() ?? 'Unknown'}', 
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 ],
               ),
             ),
@@ -700,15 +1133,18 @@ class _AdminDashboardState extends State<AdminDashboard>
                 backgroundColor: color.withOpacity(0.1),
                 child: Icon(Icons.check_circle, color: color),
               ),
-              title: Text(activity['studentEmail'] ?? 'No student', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              title: Text(activity['studentEmail']?.toString() ?? 'No student', 
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 4),
-                  Text('${activity['hours']?.toStringAsFixed(2) ?? '0.00'} hours', 
+                  Text('${(activity['hours'] ?? 0.0).toStringAsFixed(2)} hours', 
                     style: TextStyle(fontSize: 13, color: Colors.grey[700], fontWeight: FontWeight.bold)),
-                  Text('Department: ${activity['department'] ?? 'Unknown'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  Text('Date: ${activity['date'] ?? 'No date'}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  Text('Department: ${activity['department']?.toString() ?? 'Unknown'}', 
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  Text('Date: ${activity['date']?.toString() ?? 'No date'}', 
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 ],
               ),
             ),
@@ -747,7 +1183,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- UI ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -832,7 +1267,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Overview Tab --- Shows total approved hours
   Widget _buildOverviewTab() {
     final bool hasStats = stats.isNotEmpty && stats["totalStudents"] != null;
 
@@ -892,110 +1326,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                         ),
                       ),
                     ],
-                  ),
-                  
-                  // DEBUG BUTTON - Shows ALL users with case-insensitive search
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        // Get ALL users
-                        final allUsers = await _firestore.collection('users').get();
-                        
-                        print('🔥🔥🔥 DEBUG: ALL USERS IN DATABASE (${allUsers.docs.length}):');
-                        
-                        // Count by role (case insensitive)
-                        Map<String, int> roleCount = {};
-                        List<Map<String, dynamic>> supervisors = [];
-                        List<Map<String, dynamic>> students = [];
-                        
-                        for (var doc in allUsers.docs) {
-                          final data = doc.data();
-                          final email = data['email'] ?? 'No email';
-                          final originalRole = data['role'] ?? 'No role';
-                          final role = originalRole.toLowerCase();
-                          final status = data['status'] ?? 'No status';
-                          
-                          // Count roles (keep original for display)
-                          roleCount[originalRole] = (roleCount[originalRole] ?? 0) + 1;
-                          
-                          // Track supervisors specifically (case insensitive)
-                          if (role == 'supervisor') {
-                            supervisors.add({'email': email, 'status': status, 'role': originalRole});
-                          } else if (role == 'student') {
-                            students.add({'email': email, 'status': status, 'role': originalRole});
-                          }
-                          
-                          print('   - $email | Original Role: "$originalRole" | Lowercase: "$role" | Status: $status');
-                        }
-                        
-                        print('🔥🔥🔥 ROLE BREAKDOWN (Original Case):');
-                        roleCount.forEach((role, count) {
-                          print('   - "$role": $count users');
-                        });
-                        
-                        print('🔥🔥🔥 SUPERVISORS FOUND (${supervisors.length}):');
-                        for (var sup in supervisors) {
-                          print('   - ${sup['email']} | Role: "${sup['role']}" | Status: ${sup['status']}');
-                        }
-                        
-                        print('🔥🔥🔥 STUDENTS FOUND (${students.length}):');
-                        for (var stu in students) {
-                          print('   - ${stu['email']} | Role: "${stu['role']}" | Status: ${stu['status']}');
-                        }
-                        
-                        // Check approved hours
-                        final sessions = await _firestore.collection('work_sessions').get();
-                        double total = 0;
-                        int approved = 0;
-                        print('🔥🔥🔥 DEBUG: Checking work sessions:');
-                        for (var session in sessions.docs) {
-                          final data = session.data();
-                          if (data['status']?.toString().toLowerCase() == 'approved') {
-                            approved++;
-                            total += (data['hours'] ?? 0).toDouble();
-                            print('   ✅ ${data['studentEmail']}: ${data['hours']}h (status: ${data['status']})');
-                          }
-                        }
-                        print('🔥🔥🔥 Approved sessions: $approved, Total hours: $total');
-                        
-                        // Show results in a dialog
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: Text('Debug Info'),
-                            content: Container(
-                              width: double.maxFinite,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Total Users: ${allUsers.docs.length}'),
-                                  Text('Supervisors: ${supervisors.length}'),
-                                  Text('Students: ${students.length}'),
-                                  Text('Approved Sessions: $approved'),
-                                  Text('Total Hours: $total'),
-                                  SizedBox(height: 8),
-                                  Text('Check console for full details!'),
-                                ],
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: Text('OK'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: Text('🔍 DEBUG: Check ALL Users (Case Insensitive)'),
-                    ),
                   ),
                 ],
               ),
@@ -1068,7 +1398,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: const Text(
-                              "No approved hours yet. Hours will appear when work sessions are approved.",
+                              "No approved hours yet.",
                               style: TextStyle(fontSize: 14, color: Colors.grey),
                               textAlign: TextAlign.center,
                             ),
@@ -1097,7 +1427,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Users Tab --- 
   Widget _buildUsersTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -1184,11 +1513,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                     final user = filteredUsers[i];
                     final userData = user.data() as Map<String, dynamic>;
                     final userId = user.id;
-                    final email = userData['email'] ?? 'No email';
-                    final role = userData['role'] ?? 'No role';
-                    final status = userData['status'] ?? 'pending';
-                    final idNumber = userData['idNumber'] ?? 'No ID';
-                    final department = userData['department'] ?? 'No department';
+                    final email = userData['email']?.toString() ?? 'No email';
+                    final role = userData['role']?.toString() ?? 'No role';
+                    final status = userData['status']?.toString() ?? 'pending';
+                    final idNumber = userData['idNumber']?.toString() ?? 'No ID';
+                    final department = userData['department']?.toString() ?? 'No department';
                     final createdAt = userData['createdAt'];
 
                     return Card(
@@ -1262,17 +1591,89 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Reports Tab ---
   Widget _buildReportsTab() {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: ListView(
-        children: [_exportCard(), const SizedBox(height: 16), _reportSummary()],
+        children: [
+          _buildExportCard(),
+          const SizedBox(height: 16),
+          _buildReportSummary(),
+        ],
       ),
     );
   }
 
-  // --- Helper Widgets ---
+  Widget _buildExportCard() {
+    return Card(
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Export Reports",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _getFilterDescription(),
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _showExportFilterDialog,
+              icon: const Icon(Icons.filter_alt),
+              label: const Text("Export with Filters"),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 45),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportSummary() {
+    return Card(
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Report Summary",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue),
+            ),
+            const SizedBox(height: 12),
+            _buildSummaryRow("This Month", "${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
+            _buildSummaryRow("Last Month", "${(reportStats["lastMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
+            _buildSummaryRow("Total Students", stats["totalStudents"].toString()),
+            _buildSummaryRow("Pending Approvals", stats["pendingApprovals"].toString()),
+            _buildSummaryRow("Total Hours Approved", "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(2)} hrs"),
+            _buildSummaryRow("Avg Hours/Student", "${(reportStats["avgHoursPerStudent"] ?? 0.0).toStringAsFixed(2)} hrs"),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.black54)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
   Widget _loadingStatCard() {
     return Container(
       decoration: BoxDecoration(
@@ -1433,6 +1834,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
+  // ========== UPDATED ADD USER DIALOG WITH ID VALIDATION ==========
   void _addUserDialog(String role) {
     final emailController = TextEditingController();
     final idNumberController = TextEditingController();
@@ -1451,11 +1853,38 @@ class _AdminDashboardState extends State<AdminDashboard>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const SizedBox(height: 12),
-                  TextField(controller: emailController, decoration: const InputDecoration(labelText: "Email", border: OutlineInputBorder()), keyboardType: TextInputType.emailAddress),
+                  TextField(
+                    controller: emailController, 
+                    decoration: const InputDecoration(
+                      labelText: "Email", 
+                      border: OutlineInputBorder(),
+                      hintText: "e.g., name@daystar.ac.ke",
+                    ), 
+                    keyboardType: TextInputType.emailAddress,
+                  ),
                   const SizedBox(height: 12),
-                  TextField(controller: idNumberController, decoration: const InputDecoration(labelText: "ID Number", border: OutlineInputBorder())),
+                  TextField(
+                    controller: idNumberController, 
+                    decoration: const InputDecoration(
+                      labelText: "ID Number", 
+                      border: OutlineInputBorder(),
+                      hintText: "6-14 digits only",
+                      helperText: "Must be 6-14 digits (e.g., 12345678)",
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                  ),
                   const SizedBox(height: 12),
-                  TextField(controller: departmentController, decoration: const InputDecoration(labelText: "Department", border: OutlineInputBorder())),
+                  TextField(
+                    controller: departmentController, 
+                    decoration: const InputDecoration(
+                      labelText: "Department", 
+                      border: OutlineInputBorder(),
+                      hintText: "e.g., Kitchen, Sports, Library",
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: passwordController,
@@ -1474,7 +1903,10 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+              TextButton(
+                onPressed: () => Navigator.pop(context), 
+                child: const Text("Cancel")
+              ),
               ElevatedButton(
                 onPressed: () async {
                   final email = emailController.text.trim();
@@ -1482,9 +1914,29 @@ class _AdminDashboardState extends State<AdminDashboard>
                   final department = departmentController.text.trim();
                   final password = passwordController.text.trim();
 
-                  if (!_isValidEmail(email) || idNumber.isEmpty || department.isEmpty || password.length < 6) {
+                  // Validate email
+                  if (!_isValidEmail(email)) {
                     Navigator.pop(context);
-                    _showSnack("⚠️ Please fill all fields correctly. Password must be at least 6 characters.");
+                    _showSnack("⚠️ Please enter a valid email address.");
+                    return;
+                  }
+
+                  // Validate ID Number (6-14 digits)
+                  if (!_isValidIdNumber(idNumber)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ ID Number must be 6-14 digits only.");
+                    return;
+                  }
+
+                  if (department.isEmpty) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please enter a department.");
+                    return;
+                  }
+
+                  if (password.length < 6) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Password must be at least 6 characters.");
                     return;
                   }
 
@@ -1492,10 +1944,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                   await _showLoadingEffect(() async {
                     try {
                       await _createUserWithEmailAndPassword(email, password, role, department, idNumber);
-                      _showSnack("$role added successfully. They can now login with the provided credentials.", color: Colors.green);
+                      _showSnack("✅ $role added successfully.", color: Colors.green);
                       await _loadAllData();
                     } catch (e) {
-                      _showSnack("Error adding user: $e");
+                      _showSnack("❌ Error adding user: $e");
                     }
                   });
                 },
@@ -1508,34 +1960,11 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  void _approveUser(String userId, String email) async {
-    await _showLoadingEffect(() async {
-      try {
-        await _firebaseService.updateUserStatus(userId, 'approved');
-        _showSnack("$email approved successfully.", color: Colors.green);
-        await _loadAllData();
-      } catch (e) {
-        _showSnack("Error approving user: $e");
-      }
-    });
-  }
-
-  void _declineUser(String userId, String email) async {
-    await _showLoadingEffect(() async {
-      try {
-        await _firebaseService.updateUserStatus(userId, 'declined');
-        _showSnack("$email declined.", color: Colors.red);
-        await _loadAllData();
-      } catch (e) {
-        _showSnack("Error declining user: $e");
-      }
-    });
-  }
-
+  // ========== UPDATED EDIT USER DIALOG WITH ID VALIDATION ==========
   void _editUserDialog(Map<String, dynamic> user, String userId) {
-    final emailController = TextEditingController(text: user["email"] ?? '');
-    final idNumberController = TextEditingController(text: user["idNumber"] ?? '');
-    final departmentController = TextEditingController(text: user["department"] ?? '');
+    final emailController = TextEditingController(text: user["email"]?.toString() ?? '');
+    final idNumberController = TextEditingController(text: user["idNumber"]?.toString() ?? '');
+    final departmentController = TextEditingController(text: user["department"]?.toString() ?? '');
     String role = user["role"]?.toString() ?? 'Student';
     final List<String> validRoles = ["Student", "Supervisor"];
     if (!validRoles.contains(role)) role = 'Student';
@@ -1550,36 +1979,84 @@ class _AdminDashboardState extends State<AdminDashboard>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(controller: emailController, decoration: const InputDecoration(labelText: "Email", border: OutlineInputBorder()), keyboardType: TextInputType.emailAddress),
+                  TextField(
+                    controller: emailController, 
+                    decoration: const InputDecoration(
+                      labelText: "Email", 
+                      border: OutlineInputBorder(),
+                    ), 
+                    keyboardType: TextInputType.emailAddress,
+                  ),
                   const SizedBox(height: 12),
-                  TextField(controller: idNumberController, decoration: const InputDecoration(labelText: "ID Number", border: OutlineInputBorder())),
+                  TextField(
+                    controller: idNumberController, 
+                    decoration: const InputDecoration(
+                      labelText: "ID Number", 
+                      border: OutlineInputBorder(),
+                      helperText: "6-14 digits only",
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                  ),
                   const SizedBox(height: 12),
-                  TextField(controller: departmentController, decoration: const InputDecoration(labelText: "Department", border: OutlineInputBorder())),
+                  TextField(
+                    controller: departmentController, 
+                    decoration: const InputDecoration(
+                      labelText: "Department", 
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: role,
-                    items: validRoles.map((String role) => DropdownMenuItem<String>(value: role, child: Text(role))).toList(),
+                    items: validRoles.map((String role) => DropdownMenuItem<String>(
+                      value: role, 
+                      child: Text(role)
+                    )).toList(),
                     onChanged: (String? newValue) {
                       if (newValue != null) setState(() => role = newValue);
                     },
-                    decoration: const InputDecoration(labelText: "Role", border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: "Role", 
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ],
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+              TextButton(
+                onPressed: () => Navigator.pop(context), 
+                child: const Text("Cancel")
+              ),
               ElevatedButton(
                 onPressed: () async {
                   final email = emailController.text.trim();
                   final idNumber = idNumberController.text.trim();
                   final department = departmentController.text.trim();
 
-                  if (!_isValidEmail(email) || idNumber.isEmpty || department.isEmpty) {
+                  // Validate email
+                  if (!_isValidEmail(email)) {
                     Navigator.pop(context);
-                    _showSnack("⚠️ Please fill all fields correctly.");
+                    _showSnack("⚠️ Please enter a valid email address.");
                     return;
                   }
+
+                  // Validate ID Number (6-14 digits)
+                  if (!_isValidIdNumber(idNumber)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ ID Number must be 6-14 digits only.");
+                    return;
+                  }
+
+                  if (department.isEmpty) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please enter a department.");
+                    return;
+                  }
+
                   if (!validRoles.contains(role)) {
                     Navigator.pop(context);
                     _showSnack("⚠️ Please select a valid role.");
@@ -1593,7 +2070,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                       _showSnack("✅ User updated successfully.", color: Colors.green);
                       await _loadAllData();
                     } catch (e) {
-                      _showSnack("Error updating user: $e");
+                      _showSnack("❌ Error updating user: $e");
                     }
                   });
                 },
@@ -1604,6 +2081,30 @@ class _AdminDashboardState extends State<AdminDashboard>
         },
       ),
     );
+  }
+
+  void _approveUser(String userId, String email) async {
+    await _showLoadingEffect(() async {
+      try {
+        await _firebaseService.updateUserStatus(userId, 'approved');
+        _showSnack("✅ $email approved successfully.", color: Colors.green);
+        await _loadAllData();
+      } catch (e) {
+        _showSnack("❌ Error approving user: $e");
+      }
+    });
+  }
+
+  void _declineUser(String userId, String email) async {
+    await _showLoadingEffect(() async {
+      try {
+        await _firebaseService.updateUserStatus(userId, 'declined');
+        _showSnack("❌ $email declined.", color: Colors.red);
+        await _loadAllData();
+      } catch (e) {
+        _showSnack("❌ Error declining user: $e");
+      }
+    });
   }
 
   void _confirmDelete(String userId, String email) {
@@ -1620,28 +2121,16 @@ class _AdminDashboardState extends State<AdminDashboard>
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              Navigator.pop(context); // close dialog
+              Navigator.pop(context);
               await _showLoadingEffect(() async {
                 try {
-                  // 1. Attempt to delete from Firestore
                   await _firebaseService.deleteUser(userId);
-                  
-                  // 2. Verify the deletion by trying to fetch the document again
                   final docSnapshot = await _firestore.collection('users').doc(userId).get();
                   if (docSnapshot.exists) {
-                    // If document still exists, deletion failed
                     throw Exception('User document still exists after deletion attempt.');
                   }
-
                   _showSnack("✅ $email removed successfully.", color: Colors.green);
-                  
-                  // 3. Force a complete refresh of all data
                   await _loadAllData();
-                  
-                  // 4. Manually trigger a rebuild of the UI
-                  setState(() {
-                    // This will rebuild the entire dashboard, including the Users tab
-                  });
                 } catch (e) {
                   print('❌ Delete error: $e');
                   _showSnack("❌ Error deleting user: $e", color: Colors.red);
@@ -1650,486 +2139,6 @@ class _AdminDashboardState extends State<AdminDashboard>
             },
             child: const Text("Delete"),
           ),
-        ],
-      ),
-    );
-  }
-
-  // --- ENHANCED EXPORT FUNCTIONS ---
-
-  Future<List<Map<String, dynamic>>> _fetchReportData() async {
-    try {
-      final usersSnapshot = await _firestore.collection('users').orderBy('createdAt', descending: true).get();
-      final users = usersSnapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          'email': data['email']?.toString() ?? '',
-          'role': data['role']?.toString() ?? '',
-          'status': data['status']?.toString() ?? '',
-          'department': data['department']?.toString() ?? '',
-          'idNumber': data['idNumber']?.toString() ?? '',
-          'name': data['name']?.toString() ?? '',
-          'createdAt': formatTimestampForExport(data['createdAt']),
-        };
-      }).toList();
-
-      final sessionsSnapshot = await _firestore.collection('work_sessions').orderBy('submittedAt', descending: true).get();
-      print('🔍 Fetching work sessions... Found ${sessionsSnapshot.docs.length} sessions');
-
-      final sessions = sessionsSnapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          'studentId': data['studentId']?.toString() ?? '',
-          'studentEmail': data['studentEmail']?.toString() ?? '',
-          'studentName': data['studentName']?.toString() ?? '',
-          'hours': _extractHours(data),
-          'status': data['status']?.toString() ?? '',
-          'reportDetails': data['reportDetails']?.toString() ?? '',
-          'date': data['date']?.toString() ?? '',
-          'department': data['department']?.toString() ?? '',
-          'submittedAt': formatTimestampForExport(data['submittedAt']),
-        };
-      }).toList();
-
-      print('✅ Users: ${users.length}, Sessions: ${sessions.length}');
-      
-      return [
-        {'type': 'users', 'data': users},
-        {'type': 'work_sessions', 'data': sessions},
-      ];
-    } catch (e) {
-      print('❌ Error fetching report data: $e');
-      throw Exception('Failed to fetch report data: $e');
-    }
-  }
-
-  Future<void> _exportPDF(String format) async {
-    await _showLoadingEffect(() async {
-      try {
-        final reportData = await _fetchReportData();
-        // Use Times-Roman font for better Unicode support
-        final pdf = pw.Document(
-          theme: pw.ThemeData.withFont(
-            base: pw.Font.times(),
-            bold: pw.Font.timesBold(),
-          ),
-        );
-
-        // Helper to format numbers
-        String formatNumber(dynamic value, {int decimals = 2}) {
-          if (value == null) return '0.00';
-          if (value is num) return value.toStringAsFixed(decimals);
-          return value.toString();
-        }
-
-        // Cover Page
-        pdf.addPage(
-          pw.Page(
-            pageFormat: PdfPageFormat.a4,
-            build: (context) => pw.Center(
-              child: pw.Column(
-                mainAxisAlignment: pw.MainAxisAlignment.center,
-                children: [
-                  pw.Container(
-                    width: 100,
-                    height: 100,
-                    decoration: pw.BoxDecoration(
-                      color: PdfColors.blue700,
-                      shape: pw.BoxShape.circle,
-                    ),
-                    child: pw.Center(
-                      child: pw.Text(
-                        'WS',
-                        style: pw.TextStyle(
-                          color: PdfColors.white,
-                          fontSize: 40,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                  pw.SizedBox(height: 30),
-                  pw.Text(
-                    'WorkStudy Admin Report',
-                    style: pw.TextStyle(
-                      fontSize: 28,
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.blue800,
-                    ),
-                  ),
-                  pw.SizedBox(height: 20),
-                  pw.Text(
-                    'Generated: ${DateFormat('EEEE, MMMM d, yyyy - h:mm a').format(DateTime.now())}',
-                    style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700),
-                  ),
-                  pw.SizedBox(height: 40),
-                  pw.Container(
-                    width: 400,
-                    padding: const pw.EdgeInsets.all(20),
-                    decoration: pw.BoxDecoration(
-                      color: PdfColors.blue50,
-                      borderRadius: pw.BorderRadius.circular(10),
-                    ),
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        _buildSummaryRow('Total Users', '${stats['totalUsers']}'),
-                        _buildSummaryRow('Students', '${stats['totalStudents']}'),
-                        _buildSummaryRow('Supervisors', '${stats['totalSupervisors']}'),
-                        _buildSummaryRow('Pending Approvals', '${stats['pendingApprovals']}'),
-                        _buildSummaryRow('Total Approved Hours', '${formatNumber(stats['totalHoursApproved'])} h'),
-                        _buildSummaryRow('This Month Hours', '${formatNumber(reportStats['thisMonthHours'])} h'),
-                        _buildSummaryRow('Avg Hours/Student', '${formatNumber(reportStats['avgHoursPerStudent'])} h'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-
-        // Users Section
-        final usersData = reportData.firstWhere((s) => s['type'] == 'users')['data'] as List<Map<String, dynamic>>;
-        
-        pdf.addPage(
-          pw.Page(
-            pageFormat: PdfPageFormat.a4,
-            build: (context) {
-              if (usersData.isEmpty) {
-                return pw.Center(
-                  child: pw.Column(
-                    mainAxisAlignment: pw.MainAxisAlignment.center,
-                    children: [
-                      pw.Icon(pw.IconData(0x26A0), size: 50),
-                      pw.SizedBox(height: 20),
-                      pw.Text(
-                        'No user data available.',
-                        style: const pw.TextStyle(fontSize: 16, color: PdfColors.red),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              
-              return pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        'Users',
-                        style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
-                      ),
-                      pw.Container(
-                        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: pw.BoxDecoration(
-                          color: PdfColors.blue50,
-                          borderRadius: pw.BorderRadius.circular(5),
-                        ),
-                        child: pw.Text(
-                          'Total: ${usersData.length}',
-                          style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                  pw.SizedBox(height: 20),
-                  pw.TableHelper.fromTextArray(
-                    border: pw.TableBorder.all(color: PdfColors.grey300),
-                    headerStyle: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.white,
-                      fontSize: 10,
-                    ),
-                    headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
-                    cellStyle: const pw.TextStyle(fontSize: 8),
-                    cellAlignments: {
-                      0: pw.Alignment.centerLeft,
-                      1: pw.Alignment.centerLeft,
-                      2: pw.Alignment.centerLeft,
-                      3: pw.Alignment.centerLeft,
-                    },
-                    headers: const ['Email', 'Role', 'Status', 'ID Number'],
-                    data: usersData.map((user) {
-                      return [
-                        user['email'] ?? '',
-                        user['role'] ?? '',
-                        user['status'] ?? '',
-                        user['idNumber'] ?? '',
-                      ];
-                    }).toList(),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-
-        // Work Sessions Section
-        final sessionsData = reportData.firstWhere((s) => s['type'] == 'work_sessions')['data'] as List<Map<String, dynamic>>;
-        
-        pdf.addPage(
-          pw.Page(
-            pageFormat: PdfPageFormat.a4,
-            build: (context) {
-              if (sessionsData.isEmpty) {
-                return pw.Center(
-                  child: pw.Column(
-                    mainAxisAlignment: pw.MainAxisAlignment.center,
-                    children: [
-                      pw.Icon(pw.IconData(0x1F4CA), size: 50),
-                      pw.SizedBox(height: 20),
-                      pw.Text(
-                        'No work session data available.',
-                        style: const pw.TextStyle(fontSize: 16, color: PdfColors.grey),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              
-              return pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        'Work Sessions',
-                        style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
-                      ),
-                      pw.Container(
-                        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: pw.BoxDecoration(
-                          color: PdfColors.blue50,
-                          borderRadius: pw.BorderRadius.circular(5),
-                        ),
-                        child: pw.Text(
-                          'Total: ${sessionsData.length}',
-                          style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                  pw.SizedBox(height: 20),
-                  pw.TableHelper.fromTextArray(
-                    border: pw.TableBorder.all(color: PdfColors.grey300),
-                    headerStyle: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.white,
-                      fontSize: 9,
-                    ),
-                    headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
-                    cellStyle: const pw.TextStyle(fontSize: 7),
-                    cellAlignments: {
-                      0: pw.Alignment.centerLeft,
-                      1: pw.Alignment.centerLeft,
-                      2: pw.Alignment.centerRight,
-                      3: pw.Alignment.centerLeft,
-                      4: pw.Alignment.centerLeft,
-                    },
-                    headers: const ['Student Email', 'Student Name', 'Hours', 'Status', 'Date'],
-                    data: sessionsData.map((session) {
-                      return [
-                        session['studentEmail'] ?? '',
-                        session['studentName'] ?? '',
-                        formatNumber(session['hours']),
-                        session['status'] ?? '',
-                        session['date'] ?? '',
-                      ];
-                    }).toList(),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-
-        final bytes = await pdf.save();
-        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf";
-
-        if (kIsWeb) {
-          saveFileWeb(bytes, fileName);
-          _showSnack("✅ PDF report download initiated!", color: Colors.green);
-        } else {
-          final path = await saveFileOther(bytes, fileName);
-          _showSnack("✅ PDF report exported to: $path", color: Colors.green);
-        }
-      } catch (e) {
-        print('❌ PDF export error: $e');
-        _showSnack("PDF export failed: $e");
-      }
-    });
-  }
-
-  pw.Widget _buildSummaryRow(String label, String value) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 4),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(label, style: const pw.TextStyle(fontSize: 12)),
-          pw.Text(value, style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _exportExcel(String format) async {
-    await _showLoadingEffect(() async {
-      try {
-        final reportData = await _fetchReportData();
-        final workbook = excel.Excel.createExcel();
-
-        // Helper to format numbers
-        String formatNumber(dynamic value, {int decimals = 2}) {
-          if (value == null) return '0.00';
-          if (value is num) return value.toStringAsFixed(decimals);
-          return value.toString();
-        }
-
-        // --- Dashboard Sheet ---
-        final dashboardSheet = workbook['Dashboard'];
-        dashboardSheet.appendRow([excel.TextCellValue('WorkStudy Admin Report')]);
-        dashboardSheet.appendRow([excel.TextCellValue('Generated: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}')]);
-        dashboardSheet.appendRow([]);
-        dashboardSheet.appendRow([excel.TextCellValue('Summary'), excel.TextCellValue('')]);
-        dashboardSheet.appendRow([excel.TextCellValue('Total Users'), excel.TextCellValue('${stats['totalUsers']}')]);
-        dashboardSheet.appendRow([excel.TextCellValue('Students'), excel.TextCellValue('${stats['totalStudents']}')]);
-        dashboardSheet.appendRow([excel.TextCellValue('Supervisors'), excel.TextCellValue('${stats['totalSupervisors']}')]);
-        dashboardSheet.appendRow([excel.TextCellValue('Pending Approvals'), excel.TextCellValue('${stats['pendingApprovals']}')]);
-        dashboardSheet.appendRow([excel.TextCellValue('Total Approved Hours'), excel.TextCellValue(formatNumber(stats['totalHoursApproved']))]);
-        dashboardSheet.appendRow([excel.TextCellValue('This Month Hours'), excel.TextCellValue(formatNumber(reportStats['thisMonthHours']))]);
-        dashboardSheet.appendRow([excel.TextCellValue('Last Month Hours'), excel.TextCellValue(formatNumber(reportStats['lastMonthHours']))]);
-        dashboardSheet.appendRow([excel.TextCellValue('Avg Hours/Student'), excel.TextCellValue(formatNumber(reportStats['avgHoursPerStudent']))]);
-        // Auto-fit columns
-        for (int i = 0; i < 2; i++) {
-          dashboardSheet.setColAutoFit(i);
-        }
-
-        // --- Users Sheet ---
-        final usersData = reportData.firstWhere((s) => s['type'] == 'users')['data'] as List<Map<String, dynamic>>;
-        final usersSheet = workbook['Users'];
-        if (usersData.isNotEmpty) {
-          final headers = ['Email', 'Role', 'Status', 'Department', 'ID Number', 'Name', 'Created'];
-          usersSheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
-          for (var user in usersData) {
-            usersSheet.appendRow([
-              excel.TextCellValue(user['email'] ?? ''),
-              excel.TextCellValue(user['role'] ?? ''),
-              excel.TextCellValue(user['status'] ?? ''),
-              excel.TextCellValue(user['department'] ?? ''),
-              excel.TextCellValue(user['idNumber'] ?? ''),
-              excel.TextCellValue(user['name'] ?? ''),
-              excel.TextCellValue(user['createdAt'] ?? ''),
-            ]);
-          }
-          for (int i = 0; i < headers.length; i++) {
-            usersSheet.setColAutoFit(i);
-          }
-        } else {
-          usersSheet.appendRow([excel.TextCellValue('No user data available.')]);
-        }
-
-        // --- Work Sessions Sheet ---
-        final sessionsData = reportData.firstWhere((s) => s['type'] == 'work_sessions')['data'] as List<Map<String, dynamic>>;
-        final sessionsSheet = workbook['Work Sessions'];
-        if (sessionsData.isNotEmpty) {
-          final headers = ['Student Email', 'Student Name', 'Hours', 'Status', 'Date', 'Department', 'Submitted'];
-          sessionsSheet.appendRow(headers.map((h) => excel.TextCellValue(h)).toList());
-          for (var session in sessionsData) {
-            sessionsSheet.appendRow([
-              excel.TextCellValue(session['studentEmail'] ?? ''),
-              excel.TextCellValue(session['studentName'] ?? ''),
-              excel.TextCellValue(formatNumber(session['hours'])),
-              excel.TextCellValue(session['status'] ?? ''),
-              excel.TextCellValue(session['date'] ?? ''),
-              excel.TextCellValue(session['department'] ?? ''),
-              excel.TextCellValue(session['submittedAt'] ?? ''),
-            ]);
-          }
-          for (int i = 0; i < headers.length; i++) {
-            sessionsSheet.setColAutoFit(i);
-          }
-        } else {
-          sessionsSheet.appendRow([excel.TextCellValue('No work session data available.')]);
-        }
-
-        final bytes = workbook.save();
-        if (bytes == null) {
-          _showSnack("Failed to generate Excel file");
-          return;
-        }
-
-        final fileName = "workstudy_admin_report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.xlsx";
-
-        if (kIsWeb) {
-          saveFileWeb(Uint8List.fromList(bytes), fileName);
-          _showSnack("✅ Excel report download initiated!", color: Colors.green);
-        } else {
-          final path = await saveFileOther(Uint8List.fromList(bytes), fileName);
-          _showSnack("✅ Excel report exported to: $path", color: Colors.green);
-        }
-      } catch (e) {
-        print('❌ Excel export error: $e');
-        _showSnack("Excel export failed: $e");
-      }
-    });
-  }
-
-  Widget _exportCard() {
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Export Reports", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(onPressed: () => _exportPDF("PDF"), icon: const Icon(Icons.picture_as_pdf), label: const Text("Export PDF Report")),
-            const SizedBox(height: 8),
-            ElevatedButton.icon(onPressed: () => _exportExcel("Excel"), icon: const Icon(Icons.table_chart), label: const Text("Export Excel Report")),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _reportSummary() {
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Report Summary", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
-            const SizedBox(height: 12),
-            _summaryRow("This Month", "${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
-            _summaryRow("Last Month", "${(reportStats["lastMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
-            _summaryRow("Total Students", stats["totalStudents"].toString()),
-            _summaryRow("Pending Approvals", stats["pendingApprovals"].toString()),
-            _summaryRow("Total Hours Approved", "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(2)} hrs"),
-            _summaryRow("Avg Hours/Student (This Month)", "${(reportStats["avgHoursPerStudent"] ?? 0.0).toStringAsFixed(2)} hrs"),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _summaryRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.black54)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
     );
