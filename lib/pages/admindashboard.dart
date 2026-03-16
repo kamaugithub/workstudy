@@ -36,6 +36,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   Map<String, dynamic> stats = {
     "totalStudents": 0,
     "totalSupervisors": 0,
+    "totalAdmins": 0,
     "pendingApprovals": 0,
     "totalHoursApproved": 0.0,
     "totalUsers": 0,
@@ -55,11 +56,12 @@ class _AdminDashboardState extends State<AdminDashboard>
   // State variables for clickable cards
   List<String> _studentsEmails = [];
   List<String> _supervisorsEmails = [];
+  List<String> _adminsEmails = [];
   List<Map<String, dynamic>> _pendingActivities = [];
   List<Map<String, dynamic>> _approvedActivities = [];
 
-  // ========== NEW SIMPLIFIED FILTER VARIABLES ==========
-  String _selectedUserType = 'All'; // 'All', 'Students', 'Supervisors'
+  // ========== SIMPLIFIED FILTER VARIABLES ==========
+  String _selectedUserType = 'All'; // 'All', 'Students', 'Supervisors', 'Admins'
   String _departmentFilter = 'All';
   List<String> _availableDepartments = [];
 
@@ -189,7 +191,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   // ============================================================
-  // Load dashboard statistics - Counts ALL case variations
+  // Load dashboard statistics - Now includes Admins
   // ============================================================
   Future<void> _loadDashboardStats() async {
     try {
@@ -199,8 +201,8 @@ class _AdminDashboardState extends State<AdminDashboard>
 
       int totalStudents = 0;
       int totalSupervisors = 0;
+      int totalAdmins = 0;
       int pendingApprovals = 0;
-      int otherUsers = 0;
 
       for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
@@ -214,8 +216,10 @@ class _AdminDashboardState extends State<AdminDashboard>
         } else if (role == 'supervisor') {
           totalSupervisors++;
           if (status == 'pending') pendingApprovals++;
+        } else if (role == 'admin') {
+          totalAdmins++;
+          if (status == 'pending') pendingApprovals++;
         } else {
-          otherUsers++;
           if (status == 'pending') pendingApprovals++;
         }
       }
@@ -224,6 +228,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         stats = {
           "totalStudents": totalStudents,
           "totalSupervisors": totalSupervisors,
+          "totalAdmins": totalAdmins,
           "pendingApprovals": pendingApprovals,
           "totalHoursApproved": stats["totalHoursApproved"],
           "totalUsers": allUsers.docs.length,
@@ -331,6 +336,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       
       _studentsEmails = [];
       _supervisorsEmails = [];
+      _adminsEmails = [];
       
       for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
@@ -341,6 +347,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           _studentsEmails.add(email);
         } else if (role == 'supervisor' && email.isNotEmpty && _isValidEmail(email)) {
           _supervisorsEmails.add(email);
+        } else if (role == 'admin' && email.isNotEmpty && _isValidEmail(email)) {
+          _adminsEmails.add(email);
         }
       }
 
@@ -388,7 +396,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   // ========== ID VALIDATION FUNCTION ==========
   bool _isValidIdNumber(String idNumber) {
     if (idNumber.isEmpty) return false;
-    // Check if it contains only digits and length is between 6 and 14
     final regex = RegExp(r'^\d{6,14}$');
     return regex.hasMatch(idNumber);
   }
@@ -425,6 +432,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                           DropdownMenuItem(value: 'All', child: Text('All Users')),
                           DropdownMenuItem(value: 'Students', child: Text('Students Only')),
                           DropdownMenuItem(value: 'Supervisors', child: Text('Supervisors Only')),
+                          DropdownMenuItem(value: 'Admins', child: Text('Admins Only')),
                         ],
                         onChanged: (value) {
                           if (value != null) {
@@ -577,7 +585,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       
       final usersSnapshot = await usersQuery.get();
       
-      // Filter by user type in code (since we can't have two where clauses without index)
+      // Filter by user type in code
       List<Map<String, dynamic>> users = [];
       for (var doc in usersSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
@@ -588,6 +596,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           includeUser = role == 'student';
         } else if (_selectedUserType == 'Supervisors') {
           includeUser = role == 'supervisor';
+        } else if (_selectedUserType == 'Admins') {
+          includeUser = role == 'admin';
         }
         
         if (includeUser) {
@@ -662,7 +672,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     });
   }
 
-  // --- PDF Generation with Filters (REMOVED Student Name column) ---
+  // --- PDF Generation with Filters ---
   Future<void> _generatePDF(Map<String, dynamic> data) async {
     final pdf = pw.Document();
 
@@ -802,7 +812,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       ),
     );
 
-    // Work Sessions Section - REMOVED Student Name column
+    // Work Sessions Section
     final sessions = data['sessions'] as List;
     pdf.addPage(
       pw.Page(
@@ -874,7 +884,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // --- PDF Helper Row (RENAMED to avoid conflict) ---
+  // --- PDF Helper Row ---
   pw.Widget _buildPdfSummaryRow(String label, String value) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 4),
@@ -888,7 +898,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // --- Excel Generation with Filters (REMOVED Student Name column) ---
+  // --- Excel Generation with Filters ---
   Future<void> _generateExcel(Map<String, dynamic> data) async {
     final workbook = excel.Excel.createExcel();
 
@@ -926,7 +936,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       }
     }
 
-    // Work Sessions Sheet - REMOVED Student Name column
+    // Work Sessions Sheet
     final sessions = data['sessions'] as List;
     final sessionsSheet = workbook['Work Sessions'];
     if (sessions.isNotEmpty) {
@@ -972,6 +982,11 @@ class _AdminDashboardState extends State<AdminDashboard>
         cardData['title'] = 'Supervisors (All)';
         cardData['data'] = _supervisorsEmails;
         cardData['color'] = Colors.purple;
+        break;
+      case 'admins':
+        cardData['title'] = 'Admins (All)';
+        cardData['data'] = _adminsEmails;
+        cardData['color'] = Colors.red;
         break;
       case 'pending':
         cardData['title'] = 'Pending Approvals';
@@ -1064,12 +1079,17 @@ class _AdminDashboardState extends State<AdminDashboard>
       );
     }
 
-    if (cardType == 'students' || cardType == 'supervisors') {
+    if (cardType == 'students' || cardType == 'supervisors' || cardType == 'admins') {
       return ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: data.length,
         itemBuilder: (context, index) {
           final email = data[index] as String;
+          String roleText = '';
+          if (cardType == 'students') roleText = 'Student';
+          else if (cardType == 'supervisors') roleText = 'Supervisor';
+          else roleText = 'Admin';
+          
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
             elevation: 2,
@@ -1080,7 +1100,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               ),
               title: Text(email, style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis),
               subtitle: Text(
-                cardType == 'students' ? 'Student' : 'Supervisor',
+                roleText,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ),
@@ -1352,6 +1372,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 children: [
                   _statCard(Icons.people, "Students", "${stats["totalStudents"]}", Colors.blue, cardType: 'students'),
                   _statCard(Icons.supervisor_account, "Supervisors", "${stats["totalSupervisors"]}", Colors.purple, cardType: 'supervisors'),
+                  _statCard(Icons.admin_panel_settings, "Admins", "${stats["totalAdmins"]}", Colors.red, cardType: 'admins'),
                   _statCard(Icons.pending_actions, "Pending", "${stats["pendingApprovals"]}", Colors.orange, cardType: 'pending'),
                   _statCard(Icons.timer, "Hours", "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(2)}h", Colors.green, cardType: 'hours'),
                 ],
@@ -1432,6 +1453,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
+          // Four buttons in a row
           Row(
             children: [
               Expanded(
@@ -1444,26 +1466,37 @@ class _AdminDashboardState extends State<AdminDashboard>
                   onPressed: _showSearchDialog,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 child: _actionButton(
                   icon: Icons.person_add_alt_1,
                   label: "Add Student",
-                  color: Colors.white,
-                  textColor: Colors.blue,
-                  iconColor: Colors.blue,
+                  color: Colors.blue,
+                  textColor: Colors.white,
+                  iconColor: Colors.white,
                   onPressed: () => _addUserDialog("Student"),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 child: _actionButton(
                   icon: Icons.person_add,
                   label: "Add Supervisor",
-                  color: Colors.white,
-                  textColor: Colors.blue,
-                  iconColor: Colors.blue,
+                  color: Colors.purple,
+                  textColor: Colors.white,
+                  iconColor: Colors.white,
                   onPressed: () => _addUserDialog("Supervisor"),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _actionButton(
+                  icon: Icons.admin_panel_settings,
+                  label: "Add Admin",
+                  color: Colors.red,
+                  textColor: Colors.white,
+                  iconColor: Colors.white,
+                  onPressed: () => _addAdminDialog(),
                 ),
               ),
             ],
@@ -1520,6 +1553,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                     final department = userData['department']?.toString() ?? 'No department';
                     final createdAt = userData['createdAt'];
 
+                    // Determine card color based on role
+                    Color roleColor = role.toLowerCase() == 'admin' ? Colors.red : 
+                                     role.toLowerCase() == 'supervisor' ? Colors.purple : Colors.blue;
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 10),
                       elevation: 2,
@@ -1528,13 +1565,35 @@ class _AdminDashboardState extends State<AdminDashboard>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(email, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(email, 
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: roleColor.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    role.toUpperCase(),
+                                    style: TextStyle(
+                                      color: roleColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
                             Text('ID: $idNumber • Department: $department'),
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                Text('$role • '),
+                                Text('Status: '),
                                 Text(
                                   status.toUpperCase(),
                                   style: TextStyle(
@@ -1546,10 +1605,11 @@ class _AdminDashboardState extends State<AdminDashboard>
                               ],
                             ),
                             const SizedBox(height: 4),
-                            Text('Joined: ${formatTimestamp(createdAt)}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text('Joined: ${formatTimestamp(createdAt)}', 
+                              style: const TextStyle(fontSize: 12, color: Colors.grey)),
                             const SizedBox(height: 12),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               children: [
                                 _actionIcon(
                                   icon: Icons.check_circle,
@@ -1587,6 +1647,121 @@ class _AdminDashboardState extends State<AdminDashboard>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ========== ADD ADMIN DIALOG (Only Email, ID, Password) ==========
+  void _addAdminDialog() {
+    final emailController = TextEditingController();
+    final idNumberController = TextEditingController();
+    final passwordController = TextEditingController();
+    bool obscureTextAddAdmin = true;
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text("Add Admin"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: emailController, 
+                    decoration: const InputDecoration(
+                      labelText: "Email", 
+                      border: OutlineInputBorder(),
+                      hintText: "e.g., admin@daystar.ac.ke",
+                    ), 
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: idNumberController, 
+                    decoration: const InputDecoration(
+                      labelText: "ID Number", 
+                      border: OutlineInputBorder(),
+                      hintText: "6-14 digits only",
+                      helperText: "Must be 6-14 digits (e.g., 12345678)",
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: obscureTextAddAdmin,
+                    decoration: InputDecoration(
+                      labelText: "Password",
+                      border: const OutlineInputBorder(),
+                      hintText: "Minimum 6 characters",
+                      suffixIcon: IconButton(
+                        icon: Icon(obscureTextAddAdmin ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                        onPressed: () => setDialogState(() => obscureTextAddAdmin = !obscureTextAddAdmin),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context), 
+                child: const Text("Cancel")
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final email = emailController.text.trim();
+                  final idNumber = idNumberController.text.trim();
+                  final password = passwordController.text.trim();
+
+                  // Validate email
+                  if (!_isValidEmail(email)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Please enter a valid email address.");
+                    return;
+                  }
+
+                  // Validate ID Number (6-14 digits)
+                  if (!_isValidIdNumber(idNumber)) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ ID Number must be 6-14 digits only.");
+                    return;
+                  }
+
+                  if (password.length < 6) {
+                    Navigator.pop(context);
+                    _showSnack("⚠️ Password must be at least 6 characters.");
+                    return;
+                  }
+
+                  Navigator.pop(context);
+                  await _showLoadingEffect(() async {
+                    try {
+                      await _createUserWithEmailAndPassword(
+                        email, 
+                        password, 
+                        'Admin', 
+                        'Administration', // Default department for admins
+                        idNumber
+                      );
+                      _showSnack("✅ Admin added successfully.", color: Colors.green);
+                      await _loadAllData();
+                    } catch (e) {
+                      _showSnack("❌ Error adding admin: $e");
+                    }
+                  });
+                },
+                child: const Text("Add Admin"),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1652,6 +1827,8 @@ class _AdminDashboardState extends State<AdminDashboard>
             _buildSummaryRow("This Month", "${(reportStats["thisMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
             _buildSummaryRow("Last Month", "${(reportStats["lastMonthHours"] ?? 0.0).toStringAsFixed(2)} hours"),
             _buildSummaryRow("Total Students", stats["totalStudents"].toString()),
+            _buildSummaryRow("Total Supervisors", stats["totalSupervisors"].toString()),
+            _buildSummaryRow("Total Admins", stats["totalAdmins"].toString()),
             _buildSummaryRow("Pending Approvals", stats["pendingApprovals"].toString()),
             _buildSummaryRow("Total Hours Approved", "${(stats["totalHoursApproved"] ?? 0.0).toStringAsFixed(2)} hrs"),
             _buildSummaryRow("Avg Hours/Student", "${(reportStats["avgHoursPerStudent"] ?? 0.0).toStringAsFixed(2)} hrs"),
@@ -1753,18 +1930,15 @@ class _AdminDashboardState extends State<AdminDashboard>
   }) {
     return SizedBox(
       height: 45,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: ElevatedButton.icon(
-          icon: Icon(icon, size: 18, color: iconColor),
-          label: Text(label, style: TextStyle(fontSize: 14, color: textColor)),
-          onPressed: onPressed,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: color,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            elevation: 3,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-          ),
+      child: ElevatedButton.icon(
+        icon: Icon(icon, size: 18, color: iconColor),
+        label: Text(label, style: TextStyle(fontSize: 12, color: textColor)),
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          elevation: 3,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
         ),
       ),
     );
@@ -1773,8 +1947,14 @@ class _AdminDashboardState extends State<AdminDashboard>
   Widget _actionIcon({required IconData icon, required String label, required Color color, required VoidCallback? onPressed}) {
     return Column(
       children: [
-        IconButton(icon: Icon(icon, color: color), onPressed: onPressed),
-        Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+        IconButton(
+          icon: Icon(icon, color: color), 
+          onPressed: onPressed,
+          iconSize: 20,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+        ),
+        Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -1834,7 +2014,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // ========== UPDATED ADD USER DIALOG WITH ID VALIDATION ==========
+  // ========== ADD USER DIALOG WITH ID VALIDATION ==========
   void _addUserDialog(String role) {
     final emailController = TextEditingController();
     final idNumberController = TextEditingController();
@@ -1960,13 +2140,13 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // ========== UPDATED EDIT USER DIALOG WITH ID VALIDATION ==========
+  // ========== EDIT USER DIALOG WITH ID VALIDATION ==========
   void _editUserDialog(Map<String, dynamic> user, String userId) {
     final emailController = TextEditingController(text: user["email"]?.toString() ?? '');
     final idNumberController = TextEditingController(text: user["idNumber"]?.toString() ?? '');
     final departmentController = TextEditingController(text: user["department"]?.toString() ?? '');
     String role = user["role"]?.toString() ?? 'Student';
-    final List<String> validRoles = ["Student", "Supervisor"];
+    final List<String> validRoles = ["Student", "Supervisor", "Admin"];
     if (!validRoles.contains(role)) role = 'Student';
 
     showDialog(
@@ -2051,7 +2231,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     return;
                   }
 
-                  if (department.isEmpty) {
+                  if (department.isEmpty && role.toLowerCase() != 'admin') {
                     Navigator.pop(context);
                     _showSnack("⚠️ Please enter a department.");
                     return;
