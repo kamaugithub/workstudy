@@ -53,7 +53,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   DateTime? _lastRefreshTime;
 
   // State variables for clickable cards
-  String? _expandedCard;
   List<String> _studentsEmails = [];
   List<String> _supervisorsEmails = [];
   List<Map<String, dynamic>> _pendingActivities = [];
@@ -182,9 +181,15 @@ class _AdminDashboardState extends State<AdminDashboard>
     return DateFormat('yyyy-MM-dd HH:mm:ss').format(dateTime);
   }
 
-  // Load dashboard statistics - FIXED to use correct "Approved" status
+  // ============================================================
+  // FIXED: Load dashboard statistics - Counts ALL case variations
+  // Now properly counts "student", "Student", "supervisor", "Supervisor"
+  // ============================================================
   Future<void> _loadDashboardStats() async {
     try {
+      // Add a small delay to allow Firestore to settle after writes
+      await Future.delayed(const Duration(milliseconds: 500));
+      
       print('📊 Loading dashboard stats...');
 
       // Fetch all users to get counts
@@ -196,42 +201,96 @@ class _AdminDashboardState extends State<AdminDashboard>
       int pendingApprovals = 0;
       int otherUsers = 0;
 
+      // Track role variations for debugging
+      Map<String, int> roleVariations = {};
+
       for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
-        final role = data['role']?.toString() ?? '';
+        final originalRole = data['role']?.toString() ?? '';
+        final role = originalRole.toLowerCase(); // Convert to lowercase for comparison
         final status = data['status']?.toString()?.toLowerCase() ?? '';
 
-        if (role == 'Student') {
+        // Count role variations for debugging
+        roleVariations[originalRole] = (roleVariations[originalRole] ?? 0) + 1;
+
+        print('   - User: ${data['email']}, Original Role: "$originalRole", Lowercase: "$role", Status: $status');
+
+        // Check if it's a student (case insensitive)
+        if (role == 'student') {
           totalStudents++;
           if (status == 'pending') pendingApprovals++;
-        } else if (role == 'Supervisor') {
+        } 
+        // Check if it's a supervisor (case insensitive)
+        else if (role == 'supervisor') {
           totalSupervisors++;
           if (status == 'pending') pendingApprovals++;
-        } else {
+        } 
+        // Check if it's admin (case insensitive)
+        else if (role == 'admin') {
+          otherUsers++;
+          if (status == 'pending') pendingApprovals++;
+        }
+        // Any other role
+        else {
           otherUsers++;
           if (status == 'pending') pendingApprovals++;
         }
       }
 
-      // IMPORTANT: Query with exact case "Approved" (capital A) as shown in your database
-      print('🔍 Fetching ALL approved work sessions with status "Approved"...');
-      final approvedSessions = await _firestore
-          .collection('work_sessions')
-          .where('status', isEqualTo: 'Approved')  // Note: Capital A
-          .get();
+      print('📈 Role variations found:');
+      roleVariations.forEach((role, count) {
+        print('   - "$role": $count users');
+      });
 
-      print('⏰ Approved work sessions found: ${approvedSessions.docs.length}');
+      print('📈 Calculated stats:');
+      print('- Total Students (all): $totalStudents');
+      print('- Total Supervisors (all): $totalSupervisors');
+      print('- Other Users: $otherUsers');
+      print('- Pending Approvals: $pendingApprovals');
 
-      // Calculate total hours approved
-      double totalHoursApproved = 0.0;
-      List<String> approvedSessionIds = [];
+      setState(() {
+        stats = {
+          "totalStudents": totalStudents,
+          "totalSupervisors": totalSupervisors,
+          "pendingApprovals": pendingApprovals,
+          "totalHoursApproved": stats["totalHoursApproved"], // Keep existing hours
+          "totalUsers": allUsers.docs.length,
+        };
+      });
       
-      if (approvedSessions.docs.isNotEmpty) {
-        for (var session in approvedSessions.docs) {
-          final data = session.data() as Map<String, dynamic>;
+      // Now load hours separately
+      await _loadApprovedHours();
+      
+      print('✅ Dashboard stats updated');
+      print('   - Students: $totalStudents');
+      print('   - Supervisors: $totalSupervisors');
+      print('   - Pending: $pendingApprovals');
+      print('   - Total Users: ${allUsers.docs.length}');
+    } catch (e) {
+      print('❌ Error loading dashboard stats: $e');
+      _showSnack('Error loading stats: $e');
+    }
+  }
+
+  // Separate method to load approved hours
+  Future<void> _loadApprovedHours() async {
+    try {
+      print('🔍 Fetching approved work sessions...');
+      
+      // Query with case-insensitive approach
+      final allSessions = await _firestore.collection('work_sessions').get();
+      
+      double totalHoursApproved = 0.0;
+      int approvedCount = 0;
+      
+      for (var session in allSessions.docs) {
+        final data = session.data() as Map<String, dynamic>;
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        
+        // Check for approved status regardless of case
+        if (status == 'approved') {
+          approvedCount++;
           final hours = data['hours'];
-          final studentEmail = data['studentEmail'] ?? 'Unknown';
-          final date = data['date'] ?? 'No date';
           
           double hourValue = 0.0;
           if (hours != null) {
@@ -241,44 +300,28 @@ class _AdminDashboardState extends State<AdminDashboard>
               hourValue = hours;
             } else if (hours is String) {
               hourValue = double.tryParse(hours) ?? 0.0;
+            } else if (hours is num) {
+              hourValue = hours.toDouble();
             }
             
             totalHoursApproved += hourValue;
-            approvedSessionIds.add(session.id);
-            print('   ✅ Session: $studentEmail - $hourValue hours on $date');
           }
         }
-      } else {
-        print('⚠️ No approved sessions found with status "Approved"');
       }
-
-      print('📈 Calculated stats:');
-      print('- Total Students (all): $totalStudents');
-      print('- Total Supervisors (all): $totalSupervisors');
-      print('- Other Users: $otherUsers');
-      print('- Pending Approvals: $pendingApprovals');
-      print('- Total Hours Approved: $totalHoursApproved (from ${approvedSessions.docs.length} sessions)');
-      print('- Approved Session IDs: $approvedSessionIds');
-
+      
+      print('📊 Approved work sessions found: $approvedCount');
+      print('📊 Total hours approved: $totalHoursApproved');
+      
       setState(() {
-        stats = {
-          "totalStudents": totalStudents,
-          "totalSupervisors": totalSupervisors,
-          "pendingApprovals": pendingApprovals,
-          "totalHoursApproved": totalHoursApproved,
-          "totalUsers": allUsers.docs.length,
-        };
+        stats["totalHoursApproved"] = totalHoursApproved;
       });
       
-      print('✅ Dashboard stats updated with $totalHoursApproved total hours');
     } catch (e) {
-      print('❌ Error loading dashboard stats: $e');
-      print('Stack trace: ${e.toString()}');
-      _showSnack('Error loading stats: $e');
+      print('❌ Error loading approved hours: $e');
     }
   }
 
-  // Load report statistics - FIXED with correct case
+  // Load report statistics - FIXED with case-insensitive approach
   Future<void> _loadReportStats() async {
     try {
       final now = DateTime.now();
@@ -289,55 +332,61 @@ class _AdminDashboardState extends State<AdminDashboard>
       print('   - Current month: ${now.year}-${now.month}');
       print('   - Last month: ${lastMonthStart.year}-${lastMonthStart.month}');
 
-      // Fetch ALL approved work sessions with correct case "Approved"
-      final allApprovedSessions = await _firestore
-          .collection('work_sessions')
-          .where('status', isEqualTo: 'Approved')  // Note: Capital A
-          .get();
-
-      print('📋 Total approved sessions: ${allApprovedSessions.docs.length}');
+      // Fetch ALL approved work sessions with case-insensitive approach
+      final allSessions = await _firestore.collection('work_sessions').get();
 
       double thisMonthHours = 0.0;
       double lastMonthHours = 0.0;
       int thisMonthCount = 0;
       int lastMonthCount = 0;
 
-      for (var session in allApprovedSessions.docs) {
+      for (var session in allSessions.docs) {
         final data = session.data() as Map<String, dynamic>;
-        final submittedAt = parseAnyTimestamp(data['submittedAt']);
-        final hours = data['hours'];
-        final studentEmail = data['studentEmail'];
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        
+        // Only count approved sessions
+        if (status == 'approved') {
+          final submittedAt = parseAnyTimestamp(data['submittedAt']);
+          final hours = data['hours'];
+          final studentEmail = data['studentEmail'];
 
-        if (submittedAt != null && hours != null) {
-          double hourValue = 0.0;
-          if (hours is int) hourValue = hours.toDouble();
-          else if (hours is double) hourValue = hours;
-          else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
+          if (submittedAt != null && hours != null) {
+            double hourValue = 0.0;
+            if (hours is int) hourValue = hours.toDouble();
+            else if (hours is double) hourValue = hours;
+            else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
+            else if (hours is num) hourValue = hours.toDouble();
 
-          // Check if this month
-          if (submittedAt.year == now.year && submittedAt.month == now.month) {
-            thisMonthHours += hourValue;
-            thisMonthCount++;
-            print('   📅 This month session: $studentEmail - $hourValue');
-          }
-          // Check if last month
-          else if (submittedAt.year == lastMonthStart.year &&
-              submittedAt.month == lastMonthStart.month) {
-            lastMonthHours += hourValue;
-            lastMonthCount++;
-            print('   📅 Last month session: $studentEmail - $hourValue');
+            // Check if this month
+            if (submittedAt.year == now.year && submittedAt.month == now.month) {
+              thisMonthHours += hourValue;
+              thisMonthCount++;
+            }
+            // Check if last month
+            else if (submittedAt.year == lastMonthStart.year &&
+                submittedAt.month == lastMonthStart.month) {
+              lastMonthHours += hourValue;
+              lastMonthCount++;
+            }
           }
         }
       }
 
-      // Get total active students (with approved status)
-      final activeStudents = await _firestore
+      // Get total active students (with approved status) - case insensitive
+      final allStudents = await _firestore
           .collection('users')
-          .where('role', isEqualTo: 'Student')
-          .where('status', isEqualTo: 'approved')
           .get();
+      
+      int totalActiveStudents = 0;
+      for (var student in allStudents.docs) {
+        final data = student.data() as Map<String, dynamic>;
+        final role = data['role']?.toString().toLowerCase() ?? '';
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        if (role == 'student' && status == 'approved') {
+          totalActiveStudents++;
+        }
+      }
 
-      final totalActiveStudents = activeStudents.docs.length;
       final avgHours = totalActiveStudents > 0
           ? (thisMonthHours / totalActiveStudents)
           : 0.0;
@@ -371,101 +420,93 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  // Load email lists for clickable cards - FIXED with correct case
+  // Load email lists for clickable cards - FIXED with case-insensitive role matching
   Future<void> _loadEmailLists() async {
     try {
       print('📧 Loading email lists...');
 
-      // Load ALL students
-      final studentsSnapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'Student')
-          .get();
-
-      print('🎓 All students found: ${studentsSnapshot.docs.length}');
-      _studentsEmails = studentsSnapshot.docs
-          .map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final email = data['email']?.toString().trim() ?? '';
-            return email;
-          })
-          .where((email) => email.isNotEmpty && _isValidEmail(email))
-          .toList();
-
-      // Load ALL supervisors
-      final supervisorsSnapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'Supervisor')
-          .get();
-
-      print('👨‍🏫 All supervisors found: ${supervisorsSnapshot.docs.length}');
-      _supervisorsEmails = supervisorsSnapshot.docs
-          .map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final email = data['email']?.toString().trim() ?? '';
-            return email;
-          })
-          .where((email) => email.isNotEmpty && _isValidEmail(email))
-          .toList();
-
-      // Load ALL pending users
-      final pendingUsersSnapshot = await _firestore
-          .collection('users')
-          .where('status', isEqualTo: 'pending')
-          .get();
-
-      print('⏳ Pending users found: ${pendingUsersSnapshot.docs.length}');
-      _pendingActivities = pendingUsersSnapshot.docs.map((doc) {
+      // Load ALL students (regardless of status) - case insensitive
+      final allUsers = await _firestore.collection('users').get();
+      
+      _studentsEmails = [];
+      _supervisorsEmails = [];
+      
+      for (var doc in allUsers.docs) {
         final data = doc.data() as Map<String, dynamic>;
-        return {
-          'email': data['email']?.toString().trim() ?? 'No email',
-          'role': data['role']?.toString() ?? 'Unknown',
-          'idNumber': data['idNumber']?.toString() ?? 'No ID',
-          'department': data['department']?.toString() ?? 'No department',
-          'status': data['status']?.toString() ?? 'pending',
-          'createdAt': data['createdAt'],
-        };
-      }).toList();
-
-      // Load approved activities for hours calculation - FIXED with "Approved" (capital A)
-      print('✅ Loading approved work sessions for card details...');
-      final approvedSessions = await _firestore
-          .collection('work_sessions')
-          .where('status', isEqualTo: 'Approved')  // Note: Capital A
-          .get();
-
-      print('✅ Approved work sessions: ${approvedSessions.docs.length}');
-      _approvedActivities = approvedSessions.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        final hours = data['hours'];
-        double hourValue = 0.0;
+        final role = data['role']?.toString().toLowerCase() ?? '';
+        final email = data['email']?.toString().trim() ?? '';
         
-        if (hours != null) {
-          if (hours is int) hourValue = hours.toDouble();
-          else if (hours is double) hourValue = hours;
-          else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
+        if (role == 'student' && email.isNotEmpty && _isValidEmail(email)) {
+          _studentsEmails.add(email);
+        } else if (role == 'supervisor' && email.isNotEmpty && _isValidEmail(email)) {
+          _supervisorsEmails.add(email);
         }
-        
-        return {
-          'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
-          'hours': hourValue,
-          'date': data['date']?.toString() ?? 'No date',
-          'studentName': data['studentName']?.toString() ?? 'Unknown',
-          'department': data['department']?.toString() ?? 'Unknown',
-          'supervisorEmail': data['supervisorEmail']?.toString().trim() ?? 'No supervisor',
-        };
-      }).toList();
+      }
 
+      print('🎓 All students found: ${_studentsEmails.length}');
+      print('👨‍🏫 All supervisors found: ${_supervisorsEmails.length}');
+
+      // Load ALL pending users - case insensitive
+      print('⏳ Checking all users for pending status...');
+      
+      _pendingActivities = [];
+      for (var doc in allUsers.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        
+        if (status == 'pending') {
+          _pendingActivities.add({
+            'email': data['email']?.toString().trim() ?? 'No email',
+            'role': data['role']?.toString() ?? 'Unknown',
+            'idNumber': data['idNumber']?.toString() ?? 'No ID',
+            'department': data['department']?.toString() ?? 'No department',
+            'status': data['status']?.toString() ?? 'pending',
+            'createdAt': data['createdAt'],
+          });
+        }
+      }
+      
+      print('⏳ Pending users found: ${_pendingActivities.length}');
+
+      // Load approved activities for hours calculation - case insensitive
+      print('✅ Loading approved work sessions for card details...');
+      final allSessions = await _firestore.collection('work_sessions').get();
+      
+      _approvedActivities = [];
+      for (var doc in allSessions.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        
+        if (status == 'approved') {
+          final hours = data['hours'];
+          double hourValue = 0.0;
+          
+          if (hours != null) {
+            if (hours is int) hourValue = hours.toDouble();
+            else if (hours is double) hourValue = hours;
+            else if (hours is String) hourValue = double.tryParse(hours) ?? 0.0;
+            else if (hours is num) hourValue = hours.toDouble();
+          }
+          
+          _approvedActivities.add({
+            'studentEmail': data['studentEmail']?.toString().trim() ?? 'No email',
+            'hours': hourValue,
+            'date': data['date']?.toString() ?? 'No date',
+            'studentName': data['studentName']?.toString() ?? 'Unknown',
+            'department': data['department']?.toString() ?? 'Unknown',
+            'supervisorEmail': data['supervisorEmail']?.toString().trim() ?? 'No supervisor',
+          });
+        }
+      }
+
+      print('✅ Approved work sessions: ${_approvedActivities.length}');
+      
       print('📊 Summary:');
       print('- Students (all): ${_studentsEmails.length}');
       print('- Supervisors (all): ${_supervisorsEmails.length}');
       print('- Pending users: ${_pendingActivities.length}');
       print('- Approved sessions: ${_approvedActivities.length}');
       
-      // Print approved session details
-      for (var activity in _approvedActivities) {
-        print('   - ${activity['studentEmail']}: ${activity['hours']}h');
-      }
     } catch (e) {
       print('❌ Error loading email lists: $e');
       _studentsEmails = [];
@@ -852,6 +893,110 @@ class _AdminDashboardState extends State<AdminDashboard>
                       ),
                     ],
                   ),
+                  
+                  // DEBUG BUTTON - Shows ALL users with case-insensitive search
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        // Get ALL users
+                        final allUsers = await _firestore.collection('users').get();
+                        
+                        print('🔥🔥🔥 DEBUG: ALL USERS IN DATABASE (${allUsers.docs.length}):');
+                        
+                        // Count by role (case insensitive)
+                        Map<String, int> roleCount = {};
+                        List<Map<String, dynamic>> supervisors = [];
+                        List<Map<String, dynamic>> students = [];
+                        
+                        for (var doc in allUsers.docs) {
+                          final data = doc.data();
+                          final email = data['email'] ?? 'No email';
+                          final originalRole = data['role'] ?? 'No role';
+                          final role = originalRole.toLowerCase();
+                          final status = data['status'] ?? 'No status';
+                          
+                          // Count roles (keep original for display)
+                          roleCount[originalRole] = (roleCount[originalRole] ?? 0) + 1;
+                          
+                          // Track supervisors specifically (case insensitive)
+                          if (role == 'supervisor') {
+                            supervisors.add({'email': email, 'status': status, 'role': originalRole});
+                          } else if (role == 'student') {
+                            students.add({'email': email, 'status': status, 'role': originalRole});
+                          }
+                          
+                          print('   - $email | Original Role: "$originalRole" | Lowercase: "$role" | Status: $status');
+                        }
+                        
+                        print('🔥🔥🔥 ROLE BREAKDOWN (Original Case):');
+                        roleCount.forEach((role, count) {
+                          print('   - "$role": $count users');
+                        });
+                        
+                        print('🔥🔥🔥 SUPERVISORS FOUND (${supervisors.length}):');
+                        for (var sup in supervisors) {
+                          print('   - ${sup['email']} | Role: "${sup['role']}" | Status: ${sup['status']}');
+                        }
+                        
+                        print('🔥🔥🔥 STUDENTS FOUND (${students.length}):');
+                        for (var stu in students) {
+                          print('   - ${stu['email']} | Role: "${stu['role']}" | Status: ${stu['status']}');
+                        }
+                        
+                        // Check approved hours
+                        final sessions = await _firestore.collection('work_sessions').get();
+                        double total = 0;
+                        int approved = 0;
+                        print('🔥🔥🔥 DEBUG: Checking work sessions:');
+                        for (var session in sessions.docs) {
+                          final data = session.data();
+                          if (data['status']?.toString().toLowerCase() == 'approved') {
+                            approved++;
+                            total += (data['hours'] ?? 0).toDouble();
+                            print('   ✅ ${data['studentEmail']}: ${data['hours']}h (status: ${data['status']})');
+                          }
+                        }
+                        print('🔥🔥🔥 Approved sessions: $approved, Total hours: $total');
+                        
+                        // Show results in a dialog
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: Text('Debug Info'),
+                            content: Container(
+                              width: double.maxFinite,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Total Users: ${allUsers.docs.length}'),
+                                  Text('Supervisors: ${supervisors.length}'),
+                                  Text('Students: ${students.length}'),
+                                  Text('Approved Sessions: $approved'),
+                                  Text('Total Hours: $total'),
+                                  SizedBox(height: 8),
+                                  Text('Check console for full details!'),
+                                ],
+                              ),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: Text('OK'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text('🔍 DEBUG: Check ALL Users (Case Insensitive)'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1064,8 +1209,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 Text(
                                   status.toUpperCase(),
                                   style: TextStyle(
-                                    color: status == 'approved' ? Colors.green : 
-                                           status == 'pending' ? Colors.orange : Colors.red,
+                                    color: status.toLowerCase() == 'approved' ? Colors.green : 
+                                           status.toLowerCase() == 'pending' ? Colors.orange : Colors.red,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -1080,14 +1225,14 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 _actionIcon(
                                   icon: Icons.check_circle,
                                   label: "Approve",
-                                  color: status == 'approved' ? Colors.grey : Colors.green,
-                                  onPressed: status == 'approved' ? null : () => _approveUser(userId, email),
+                                  color: status.toLowerCase() == 'approved' ? Colors.grey : Colors.green,
+                                  onPressed: status.toLowerCase() == 'approved' ? null : () => _approveUser(userId, email),
                                 ),
                                 _actionIcon(
                                   icon: Icons.cancel,
                                   label: "Decline",
-                                  color: status == 'declined' ? Colors.grey : Colors.red,
-                                  onPressed: status == 'declined' ? null : () => _declineUser(userId, email),
+                                  color: status.toLowerCase() == 'declined' ? Colors.grey : Colors.red,
+                                  onPressed: status.toLowerCase() == 'declined' ? null : () => _declineUser(userId, email),
                                 ),
                                 _actionIcon(
                                   icon: Icons.edit,
@@ -1468,18 +1613,38 @@ class _AdminDashboardState extends State<AdminDashboard>
         title: const Text("Delete User"),
         content: Text("Are you sure you want to remove $email?"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(context); // close dialog
               await _showLoadingEffect(() async {
                 try {
+                  // 1. Attempt to delete from Firestore
                   await _firebaseService.deleteUser(userId);
-                  _showSnack("$email removed successfully.", color: Colors.green);
+                  
+                  // 2. Verify the deletion by trying to fetch the document again
+                  final docSnapshot = await _firestore.collection('users').doc(userId).get();
+                  if (docSnapshot.exists) {
+                    // If document still exists, deletion failed
+                    throw Exception('User document still exists after deletion attempt.');
+                  }
+
+                  _showSnack("✅ $email removed successfully.", color: Colors.green);
+                  
+                  // 3. Force a complete refresh of all data
                   await _loadAllData();
+                  
+                  // 4. Manually trigger a rebuild of the UI
+                  setState(() {
+                    // This will rebuild the entire dashboard, including the Users tab
+                  });
                 } catch (e) {
-                  _showSnack("Error deleting user: $e");
+                  print('❌ Delete error: $e');
+                  _showSnack("❌ Error deleting user: $e", color: Colors.red);
                 }
               });
             },
@@ -1529,14 +1694,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       }).toList();
 
       print('✅ Users: ${users.length}, Sessions: ${sessions.length}');
-      
-      // Print first few users for verification
-      if (users.isNotEmpty) {
-        print('📧 First 3 users for PDF:');
-        users.take(3).forEach((user) {
-          print('   - Email: ${user['email']}, ID: ${user['idNumber']}');
-        });
-      }
       
       return [
         {'type': 'users', 'data': users},
@@ -1634,11 +1791,9 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
         );
 
-        // Users Section - IMPROVED to ensure data displays properly
+        // Users Section
         final usersData = reportData.firstWhere((s) => s['type'] == 'users')['data'] as List<Map<String, dynamic>>;
-        print('📄 PDF Users data length: ${usersData.length}'); // DIAGNOSTIC
         
-        // Always add Users page, even if empty (with message)
         pdf.addPage(
           pw.Page(
             pageFormat: PdfPageFormat.a4,
@@ -1648,7 +1803,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   child: pw.Column(
                     mainAxisAlignment: pw.MainAxisAlignment.center,
                     children: [
-                      pw.Icon(pw.IconData(0x26A0), size: 50), // Warning sign
+                      pw.Icon(pw.IconData(0x26A0), size: 50),
                       pw.SizedBox(height: 20),
                       pw.Text(
                         'No user data available.',
@@ -1659,7 +1814,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                 );
               }
               
-              // Build users table with all data
               return pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
@@ -1717,7 +1871,6 @@ class _AdminDashboardState extends State<AdminDashboard>
 
         // Work Sessions Section
         final sessionsData = reportData.firstWhere((s) => s['type'] == 'work_sessions')['data'] as List<Map<String, dynamic>>;
-        print('📄 PDF Sessions data length: ${sessionsData.length}'); // DIAGNOSTIC
         
         pdf.addPage(
           pw.Page(
@@ -1728,7 +1881,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   child: pw.Column(
                     mainAxisAlignment: pw.MainAxisAlignment.center,
                     children: [
-                      pw.Icon(pw.IconData(0x1F4CA), size: 50), // Bar chart
+                      pw.Icon(pw.IconData(0x1F4CA), size: 50),
                       pw.SizedBox(height: 20),
                       pw.Text(
                         'No work session data available.',
@@ -1811,59 +1964,6 @@ class _AdminDashboardState extends State<AdminDashboard>
         _showSnack("PDF export failed: $e");
       }
     });
-  }
-
-  // Helper to build a consistent data table for PDF (keeping for backward compatibility)
-  pw.Widget _buildDataTable({
-    required String title,
-    required List<Map<String, dynamic>> data,
-    required List<String> columns,
-    required List<String> Function(Map<String, dynamic>) rowBuilder,
-  }) {
-    // Build the rows list
-    final List<List<String>> rows = data.map((row) => rowBuilder(row)).toList();
-    // Safety: if rows is empty, provide a placeholder
-    final displayRows = rows.isEmpty ? [['No data available']] : rows;
-    final displayColumns = rows.isEmpty ? ['Message'] : columns;
-
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Text(
-          title,
-          style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColors.blue800),
-        ),
-        pw.SizedBox(height: 10),
-        pw.Container(
-          width: double.infinity,
-          padding: const pw.EdgeInsets.all(10),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.blue50,
-            borderRadius: pw.BorderRadius.circular(5),
-          ),
-          child: pw.Text(
-            'Total Records: ${data.length}',
-            style: const pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
-          ),
-        ),
-        pw.SizedBox(height: 20),
-        pw.TableHelper.fromTextArray(
-          border: pw.TableBorder.all(color: PdfColors.grey300),
-          headerStyle: pw.TextStyle(
-            fontWeight: pw.FontWeight.bold,
-            color: PdfColors.white,
-            fontSize: 10,
-          ),
-          headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
-          cellStyle: const pw.TextStyle(fontSize: 8),
-          cellAlignments: {
-            for (int i = 0; i < displayColumns.length; i++) i: pw.Alignment.centerLeft,
-          },
-          headers: displayColumns,
-          data: displayRows,
-        ),
-      ],
-    );
   }
 
   pw.Widget _buildSummaryRow(String label, String value) {

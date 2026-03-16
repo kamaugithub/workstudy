@@ -159,8 +159,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     final data = [
       [
         excel.TextCellValue("Date"),
-        excel.TextCellValue("Student"),
-        excel.TextCellValue("Email"),
+        excel.TextCellValue("Student's Email"), // Changed: removed "Student" column, updated header
         excel.TextCellValue("Hours"),
         excel.TextCellValue("Status"),
         excel.TextCellValue("Description"),
@@ -170,9 +169,8 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
     for (var activity in activities) {
       data.add([
         excel.TextCellValue(activity["date"] ?? ''),
-        excel.TextCellValue(activity["student"] ?? ''),
         excel.TextCellValue(
-            activity["studentEmail"] ?? ''), // Added email to export
+            activity["studentEmail"] ?? activity["student"] ?? ''), // Use email first, fallback to name
         excel.TextCellValue(activity["hours"]?.toStringAsFixed(2) ?? '0.00'),
         excel.TextCellValue(activity["status"] ?? ''),
         excel.TextCellValue(activity["description"] ?? ''),
@@ -222,11 +220,9 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
         excel.TextCellValue(""),
         excel.TextCellValue(""),
         excel.TextCellValue(""),
-        excel.TextCellValue(""),
       ]);
       sheet.appendRow([
         excel.TextCellValue("Total Activities:"),
-        excel.TextCellValue(""),
         excel.TextCellValue(""),
         excel.TextCellValue(""),
         excel.TextCellValue(activities.length.toString()),
@@ -234,7 +230,6 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
       ]);
       sheet.appendRow([
         excel.TextCellValue("Total Hours:"),
-        excel.TextCellValue(""),
         excel.TextCellValue(""),
         excel.TextCellValue(""),
         excel.TextCellValue(totalHoursWorked.toStringAsFixed(2)),
@@ -388,7 +383,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
 
                 pw.SizedBox(height: 10),
 
-                // Data Table
+                // Data Table - REMOVED "Student" column, updated headers
                 pw.Table.fromTextArray(
                   border: pw.TableBorder.all(color: PdfColors.grey300),
                   headerStyle: pw.TextStyle(
@@ -404,17 +399,15 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                     color: PdfColors.grey800,
                   ),
                   cellAlignments: {
-                    0: pw.Alignment.centerLeft,
-                    1: pw.Alignment.centerLeft,
-                    2: pw.Alignment.centerLeft,
-                    3: pw.Alignment.center,
-                    4: pw.Alignment.center,
-                    5: pw.Alignment.centerLeft,
+                    0: pw.Alignment.centerLeft, // Date
+                    1: pw.Alignment.centerLeft, // Student's Email
+                    2: pw.Alignment.center,     // Hours
+                    3: pw.Alignment.center,     // Status
+                    4: pw.Alignment.centerLeft, // Description
                   },
                   headers: [
                     "Date",
-                    "Student",
-                    "Email",
+                    "Student's Email", // Changed header
                     "Hours",
                     "Status",
                     "Description"
@@ -422,8 +415,7 @@ class _SupervisorDashboardState extends State<SupervisorDashboard>
                   data: activities.map((e) {
                     return [
                       e["date"] ?? '',
-                      e["student"] ?? '',
-                      e["studentEmail"] ?? '',
+                      e["studentEmail"] ?? e["student"] ?? '', // Use email first, fallback to name
                       e["hours"]?.toStringAsFixed(2) ?? '0.00',
                       e["status"] ?? '',
                       e["description"] ?? '',
