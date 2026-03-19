@@ -9,6 +9,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as excel;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 import 'package:workstudy/export_helper/save_file_other.dart';
 import 'package:workstudy/export_helper/save_file_web.dart'
     if (dart.library.io) 'package:workstudy/export_helper/save_file_other.dart';
@@ -26,13 +27,16 @@ class _StudentDashboardState extends State<StudentDashboard>
   bool isSessionActive = false;
   String currentSessionDuration = "00:00:00";
   String comment = "";
-  late Timer timer;
+  Timer? timer; // Make it nullable
   DateTime startTime = DateTime.now();
+  DateTime? clockInTime;
+  DateTime? clockOutTime;
   String selectedActivityTab = 'pending';
 
   String ID = "";
   String studentEmail = "";
   String studentDepartment = "";
+  String studentName = "";
   double totalHoursWorked = 0.0;
   double thisWeekHours = 0.0;
 
@@ -42,6 +46,10 @@ class _StudentDashboardState extends State<StudentDashboard>
   late AnimationController _titleController;
   late Animation<double> _horizontalMovement;
   late Animation<double> _verticalMovement;
+  
+  // Draft description persistence
+  Timer? _draftSaveTimer;
+  String _draftDescription = "";
 
   @override
   void initState() {
@@ -60,14 +68,29 @@ class _StudentDashboardState extends State<StudentDashboard>
 
     _loadStudentData();
     _subscribeToActivities();
+    _loadDraftDescription();
   }
 
   @override
   void dispose() {
     _titleController.dispose();
-    if (timer.isActive) timer.cancel();
+    timer?.cancel(); // Safe call with ?.
+    _draftSaveTimer?.cancel();
     _activitiesSubscription?.cancel();
+    _saveDraftDescription();
     super.dispose();
+  }
+
+  void _loadDraftDescription() {
+    setState(() {
+      comment = _draftDescription;
+    });
+  }
+
+  void _saveDraftDescription() {
+    if (comment.trim().isNotEmpty) {
+      _draftDescription = comment;
+    }
   }
 
   void _subscribeToActivities() {
@@ -95,10 +118,17 @@ class _StudentDashboardState extends State<StudentDashboard>
                   .map(
                     (doc) => {
                       "date": doc['date'] ?? '',
+                      "clockIn": doc['clockIn'] != null 
+                          ? (doc['clockIn'] as Timestamp).toDate() 
+                          : null,
+                      "clockOut": doc['clockOut'] != null 
+                          ? (doc['clockOut'] as Timestamp).toDate() 
+                          : null,
                       "hours": doc['hours'] ?? 0.0,
                       "status": doc['status'] ?? '',
                       "description": doc['reportDetails'] ?? '',
                       "timestamp": doc['submittedAt'],
+                      "feedback": doc['feedback'] ?? '',
                     },
                   )
                   .toList();
@@ -159,6 +189,7 @@ class _StudentDashboardState extends State<StudentDashboard>
       if (mounted) {
         setState(() {
           ID = userData['ID'] ?? "";
+          studentName = userData['name'] ?? "";
           studentEmail = userData['email'] ?? user.email ?? "";
           studentDepartment = userData['department'] ?? "";
         });
@@ -169,37 +200,191 @@ class _StudentDashboardState extends State<StudentDashboard>
   }
 
   void handleClockIn() {
-    setState(() {
-      isSessionActive = true;
-      startTime = DateTime.now();
-      currentSessionDuration = "00:00:00";
-    });
-    timer = Timer.periodic(const Duration(seconds: 1), (Timer t) {
-      if (mounted) {
-        setState(() {
-          final duration = DateTime.now().difference(startTime);
-          currentSessionDuration = _formatDuration(duration);
-        });
-      }
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Session Started. Don't forget to clock out!"),
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(20)),
+        ),
+        title: const Text("Start Work Session"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Are you ready to start your work session?"),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF02AEEE).withOpacity(0.1),
+                borderRadius: const BorderRadius.all(Radius.circular(10)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.access_time, color: const Color(0xFF02AEEE)),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Start time: ${DateFormat('hh:mm:ss a').format(DateTime.now())}",
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                isSessionActive = true;
+                startTime = DateTime.now();
+                clockInTime = DateTime.now();
+                clockOutTime = null;
+                currentSessionDuration = "00:00:00";
+              });
+              timer = Timer.periodic(const Duration(seconds: 1), (Timer t) {
+                if (mounted) {
+                  setState(() {
+                    final duration = DateTime.now().difference(startTime);
+                    currentSessionDuration = _formatDuration(duration);
+                  });
+                }
+              });
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: Colors.green),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "Session started at ${DateFormat('hh:mm:ss a').format(clockInTime!)}",
+                        ),
+                      ),
+                    ],
+                  ),
+                  backgroundColor: const Color(0xFF032540),
+                  duration: const Duration(seconds: 3),
+                  behavior: SnackBarBehavior.floating,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                  ),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF032540),
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(10)),
+              ),
+            ),
+            child: const Text("Start Session", style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
 
   void handleClockOut() {
-    if (timer.isActive) timer.cancel();
-    if (mounted) {
-      setState(() {
-        isSessionActive = false;
-      });
-    }
+    timer?.cancel(); // Safe call with ?.
+    
+    setState(() {
+      isSessionActive = false;
+      clockOutTime = DateTime.now();
+    });
+
+    final duration = clockOutTime!.difference(startTime);
+    final hoursWorked = (duration.inSeconds / 3600).toStringAsFixed(2);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(20)),
+        ),
+        title: const Text("Session Completed"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF02AEEE).withOpacity(0.1),
+                borderRadius: const BorderRadius.all(Radius.circular(15)),
+              ),
+              child: Column(
+                children: [
+                  _buildTimeRow("Clock In:", DateFormat('hh:mm:ss a').format(clockInTime!)),
+                  const Divider(height: 16),
+                  _buildTimeRow("Clock Out:", DateFormat('hh:mm:ss a').format(clockOutTime!)),
+                  const Divider(height: 16),
+                  _buildTimeRow("Duration:", _formatDuration(duration)),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: const BorderRadius.all(Radius.circular(8)),
+                    ),
+                    child: Text(
+                      "$hoursWorked hours worked",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Don't forget to add a description before submitting!",
+              style: TextStyle(color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text("Session Ended. Add description and submit."),
+        content: Row(
+          children: [
+            Icon(Icons.info, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(child: Text("Session ended. Add description and submit.")),
+          ],
+        ),
+        backgroundColor: Color(0xFF032540),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(10)),
+        ),
       ),
+    );
+  }
+
+  Widget _buildTimeRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+        Text(value, style: const TextStyle(fontFamily: 'monospace')),
+      ],
     );
   }
 
@@ -210,15 +395,92 @@ class _StudentDashboardState extends State<StudentDashboard>
     return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
   }
 
+  String _calculateCurrentHours() {
+    final parts = currentSessionDuration.split(':');
+    if (parts.length == 3) {
+      final totalSeconds = (int.parse(parts[0]) * 3600) +
+          (int.parse(parts[1]) * 60) +
+          int.parse(parts[2]);
+      return (totalSeconds / 3600).toStringAsFixed(2);
+    }
+    return "0.00";
+  }
+
   Future<void> handleSubmitHours() async {
     if (comment.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Please describe your work before submitting."),
+          content: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.orange),
+              SizedBox(width: 8),
+              Expanded(child: Text("Please describe your work before submitting.")),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(10)),
+          ),
         ),
       );
       return;
     }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(20)),
+        ),
+        title: const Text("Submit Work Hours"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Please review your session details:"),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: const BorderRadius.all(Radius.circular(10)),
+              ),
+              child: Column(
+                children: [
+                  if (clockInTime != null)
+                    _buildDetailRow("Clock In:", DateFormat('hh:mm:ss a').format(clockInTime!)),
+                  if (clockOutTime != null)
+                    _buildDetailRow("Clock Out:", DateFormat('hh:mm:ss a').format(clockOutTime!)),
+                  _buildDetailRow("Duration:", currentSessionDuration),
+                  _buildDetailRow("Hours:", "${_calculateCurrentHours()} hrs"),
+                  const Divider(),
+                  _buildDetailRow("Description:", comment, isDescription: true),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF032540),
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(10)),
+              ),
+            ),
+            child: const Text("Submit", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
 
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -229,6 +491,7 @@ class _StudentDashboardState extends State<StudentDashboard>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Error: User profile not found."),
+            backgroundColor: Colors.red,
           ),
         );
         return;
@@ -254,32 +517,86 @@ class _StudentDashboardState extends State<StudentDashboard>
         'studentEmail': currentStudentEmail,
         'department': studentDepartment,
         'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        'clockIn': clockInTime != null ? Timestamp.fromDate(clockInTime!) : null,
+        'clockOut': clockOutTime != null ? Timestamp.fromDate(clockOutTime!) : null,
         'hours': hours,
         'reportDetails': comment.trim(),
         'status': 'Pending',
         'submittedAt': FieldValue.serverTimestamp(),
       });
 
-      if (mounted) {
-        setState(() {
-          comment = "";
-          isSessionActive = false;
-          currentSessionDuration = "00:00:00";
-        });
-      }
+      setState(() {
+        comment = "";
+        _draftDescription = "";
+        isSessionActive = false;
+        clockInTime = null;
+        clockOutTime = null;
+        currentSessionDuration = "00:00:00";
+      });
 
-      if (timer.isActive) timer.cancel();
+      timer?.cancel(); // Safe call with ?.
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("$hours hours submitted for supervisor approval."),
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green),
+              const SizedBox(width: 8),
+              Expanded(child: Text("$hours hours submitted for supervisor approval.")),
+            ],
+          ),
+          backgroundColor: const Color(0xFF032540),
+          behavior: SnackBarBehavior.floating,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(10)),
+          ),
+          duration: const Duration(seconds: 4),
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error submitting hours: $e")),
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error, color: Colors.red),
+              const SizedBox(width: 8),
+              Expanded(child: Text("Error submitting hours: $e")),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(10)),
+          ),
+        ),
       );
     }
+  }
+
+  Widget _buildDetailRow(String label, String value, {bool isDescription = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: isDescription ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.grey),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: isDescription 
+                  ? const TextStyle(fontStyle: FontStyle.italic)
+                  : const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> exportExcel() async {
@@ -294,25 +611,40 @@ class _StudentDashboardState extends State<StudentDashboard>
 
       sheet.appendRow([excel.TextCellValue("")]);
       sheet.appendRow([excel.TextCellValue("WORKSTUDY")]);
-      sheet.appendRow([excel.TextCellValue("Student Report")]);
-      sheet.appendRow([excel.TextCellValue("Generated by: $studentEmail")]);
+      sheet.appendRow([excel.TextCellValue("Student Work Report")]);
+      sheet.appendRow([excel.TextCellValue("Generated by: $studentName ($studentEmail)")]);
       sheet.appendRow([excel.TextCellValue("Department: $studentDepartment")]);
       sheet.appendRow([
         excel.TextCellValue(
-            "Date: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}")
+            "Date: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}")
       ]);
       sheet.appendRow([]);
 
       sheet.appendRow([
         excel.TextCellValue("Date"),
+        excel.TextCellValue("Clock In"),
+        excel.TextCellValue("Clock Out"),
         excel.TextCellValue("Hours"),
         excel.TextCellValue("Status"),
         excel.TextCellValue("Description"),
       ]);
 
       for (var session in sessions) {
+        final clockIn = session["clockIn"] as Timestamp?;
+        final clockOut = session["clockOut"] as Timestamp?;
+        
         sheet.appendRow([
           excel.TextCellValue(session["date"] ?? ''),
+          excel.TextCellValue(
+            clockIn != null 
+                ? DateFormat('hh:mm:ss a').format(clockIn.toDate())
+                : 'N/A'
+          ),
+          excel.TextCellValue(
+            clockOut != null 
+                ? DateFormat('hh:mm:ss a').format(clockOut.toDate())
+                : 'N/A'
+          ),
           excel.TextCellValue(session["hours"]?.toStringAsFixed(2) ?? '0.00'),
           excel.TextCellValue(session["status"] ?? ''),
           excel.TextCellValue(session["reportDetails"] ?? ''),
@@ -322,16 +654,26 @@ class _StudentDashboardState extends State<StudentDashboard>
       sheet.appendRow([]);
       sheet.appendRow([
         excel.TextCellValue("TOTAL HOURS:"),
+        excel.TextCellValue(""),
+        excel.TextCellValue(""),
         excel.TextCellValue(totalHoursWorked.toStringAsFixed(2)),
         excel.TextCellValue(""),
         excel.TextCellValue(""),
       ]);
 
+      sheet.appendRow([]);
+      sheet.appendRow([excel.TextCellValue("SUMMARY STATISTICS")]);
+      sheet.appendRow([excel.TextCellValue("Total Sessions:"), excel.TextCellValue(sessions.length.toString())]);
+      sheet.appendRow([excel.TextCellValue("Average Hours per Session:"), excel.TextCellValue(
+        sessions.isEmpty ? "0.00" : (totalHoursWorked / sessions.length).toStringAsFixed(2)
+      )]);
+      sheet.appendRow([excel.TextCellValue("This Week Hours:"), excel.TextCellValue(thisWeekHours.toStringAsFixed(2))]);
+
       final bytes = workbook.encode();
       if (bytes == null) return;
 
       final fileName =
-          "workstudy_student_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx";
+          "workstudy_${studentName.replaceAll(' ', '_')}_report_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx";
       String message;
 
       if (kIsWeb) {
@@ -343,13 +685,37 @@ class _StudentDashboardState extends State<StudentDashboard>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.green),
+                const SizedBox(width: 8),
+                Expanded(child: Text(message)),
+              ],
+            ),
+            backgroundColor: const Color(0xFF032540),
+            behavior: SnackBarBehavior.floating,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(10)),
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error exporting Excel: $e")),
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.red),
+                const SizedBox(width: 8),
+                Expanded(child: Text("Error exporting Excel: $e")),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
@@ -362,180 +728,247 @@ class _StudentDashboardState extends State<StudentDashboard>
     try {
       final sessions = await FirestoreHelper.getAllWorkSessions(user.uid);
 
+      // Load fonts that support Unicode
+      final font = await PdfGoogleFonts.nunitoRegular();
+      final boldFont = await PdfGoogleFonts.nunitoBold();
+
       final pdf = pw.Document();
 
       pdf.addPage(
-        pw.Page(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(20),
           build: (context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Row(
-                  children: [
-                    pw.Container(
-                      width: 40,
-                      height: 40,
-                      decoration: pw.BoxDecoration(
-                        color: PdfColors.blue500,
-                        shape: pw.BoxShape.circle,
-                      ),
-                      child: pw.Center(
-                        child: pw.Text(
-                          "WS",
-                          style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontWeight: pw.FontWeight.bold,
-                            fontSize: 14,
-                          ),
+            return [
+              pw.Row(
+                children: [
+                  pw.Container(
+                    width: 40,
+                    height: 40,
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.blue500,
+                      shape: pw.BoxShape.circle,
+                    ),
+                    child: pw.Center(
+                      child: pw.Text(
+                        "WS",
+                        style: pw.TextStyle(
+                          font: boldFont,
+                          color: PdfColors.white,
+                          fontSize: 14,
                         ),
                       ),
                     ),
-                    pw.SizedBox(width: 10),
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  ),
+                  pw.SizedBox(width: 10),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        "WORKSTUDY",
+                        style: pw.TextStyle(
+                          font: boldFont,
+                          fontSize: 18,
+                          color: PdfColors.blue700,
+                        ),
+                      ),
+                      pw.Text(
+                        "Student Work Report",
+                        style: pw.TextStyle(
+                          font: font,
+                          fontSize: 12,
+                          color: PdfColors.grey600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 15),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.blue50,
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      "Student: $studentName",
+                      style: pw.TextStyle(
+                        font: boldFont,
+                        fontSize: 11,
+                        color: PdfColors.blue800,
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      "Email: $studentEmail",
+                      style: pw.TextStyle(
+                        font: font,
+                        fontSize: 10,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
+                    pw.Text(
+                      "Department: $studentDepartment",
+                      style: pw.TextStyle(
+                        font: font,
+                        fontSize: 10,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
+                    pw.Text(
+                      "Report Generated: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}",
+                      style: pw.TextStyle(
+                        font: font,
+                        fontSize: 10,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Text(
+                "Work Sessions Detail",
+                style: pw.TextStyle(
+                  font: boldFont,
+                  fontSize: 14,
+                  color: PdfColors.blue800,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Table.fromTextArray(
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+                headerStyle: pw.TextStyle(
+                  font: boldFont,
+                  color: PdfColors.white,
+                  fontSize: 9,
+                ),
+                headerDecoration: pw.BoxDecoration(
+                  color: PdfColors.blue700,
+                ),
+                cellStyle: pw.TextStyle(
+                  font: font,
+                  fontSize: 8,
+                  color: PdfColors.grey800,
+                ),
+                cellAlignments: {
+                  0: pw.Alignment.centerLeft,
+                  1: pw.Alignment.center,
+                  2: pw.Alignment.center,
+                  3: pw.Alignment.center,
+                  4: pw.Alignment.center,
+                  5: pw.Alignment.centerLeft,
+                },
+                headers: ["Date", "Clock In", "Clock Out", "Hours", "Status", "Description"],
+                data: sessions.map((e) {
+                  final clockIn = e["clockIn"] as Timestamp?;
+                  final clockOut = e["clockOut"] as Timestamp?;
+                  
+                  return [
+                    e["date"] ?? '',
+                    clockIn != null 
+                        ? DateFormat('hh:mm a').format(clockIn.toDate())
+                        : 'N/A',
+                    clockOut != null 
+                        ? DateFormat('hh:mm a').format(clockOut.toDate())
+                        : 'N/A',
+                    e["hours"]?.toStringAsFixed(2) ?? '0.00',
+                    e["status"] ?? '',
+                    e["reportDetails"] ?? '',
+                  ];
+                }).toList(),
+              ),
+              pw.SizedBox(height: 15),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                child: pw.Column(
+                  children: [
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                       children: [
                         pw.Text(
-                          "WORKSTUDY",
+                          "Total Hours:",
                           style: pw.TextStyle(
-                            fontSize: 18,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.blue700,
+                            font: boldFont,
+                            fontSize: 11,
+                            color: PdfColors.blue800,
                           ),
                         ),
                         pw.Text(
-                          "Student Work Report",
+                          totalHoursWorked.toStringAsFixed(2),
                           style: pw.TextStyle(
-                            fontSize: 12,
-                            color: PdfColors.grey600,
+                            font: boldFont,
+                            fontSize: 11,
+                            color: PdfColors.blue800,
+                          ),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text(
+                          "This Week:",
+                          style: pw.TextStyle(
+                            font: font,
+                            fontSize: 10,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                        pw.Text(
+                          thisWeekHours.toStringAsFixed(2),
+                          style: pw.TextStyle(
+                            font: font,
+                            fontSize: 10,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text(
+                          "Total Sessions:",
+                          style: pw.TextStyle(
+                            font: font,
+                            fontSize: 10,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                        pw.Text(
+                          sessions.length.toString(),
+                          style: pw.TextStyle(
+                            font: font,
+                            fontSize: 10,
+                            color: PdfColors.grey700,
                           ),
                         ),
                       ],
                     ),
                   ],
                 ),
-                pw.SizedBox(height: 15),
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.blue50,
-                    borderRadius: pw.BorderRadius.circular(5),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        "Generated by: $studentEmail",
-                        style: pw.TextStyle(
-                          fontSize: 10,
-                          color: PdfColors.grey700,
-                        ),
-                      ),
-                      pw.Text(
-                        "Department: $studentDepartment",
-                        style: pw.TextStyle(
-                          fontSize: 10,
-                          color: PdfColors.grey700,
-                        ),
-                      ),
-                      pw.Text(
-                        "Date: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}",
-                        style: pw.TextStyle(
-                          fontSize: 10,
-                          color: PdfColors.grey700,
-                        ),
-                      ),
-                      pw.Text(
-                        "Total Hours: ${totalHoursWorked.toStringAsFixed(2)}",
-                        style: pw.TextStyle(
-                          fontSize: 10,
-                          color: PdfColors.grey700,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                pw.SizedBox(height: 20),
-                pw.Text(
-                  "Work Sessions",
-                  style: pw.TextStyle(
-                    fontSize: 14,
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColors.blue800,
-                  ),
-                ),
-                pw.SizedBox(height: 10),
-                pw.Table.fromTextArray(
-                  border: pw.TableBorder.all(color: PdfColors.grey300),
-                  headerStyle: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColors.white,
-                    fontSize: 10,
-                  ),
-                  headerDecoration: pw.BoxDecoration(
-                    color: PdfColors.blue700,
-                  ),
-                  cellStyle: pw.TextStyle(
-                    fontSize: 9,
-                    color: PdfColors.grey800,
-                  ),
-                  cellAlignments: {
-                    0: pw.Alignment.centerLeft,
-                    1: pw.Alignment.center,
-                    2: pw.Alignment.center,
-                    3: pw.Alignment.centerLeft,
-                  },
-                  headers: ["Date", "Hours", "Status", "Description"],
-                  data: sessions.map((e) {
-                    return [
-                      e["date"] ?? '',
-                      e["hours"]?.toStringAsFixed(2) ?? '0.00',
-                      e["status"] ?? '',
-                      e["reportDetails"] ?? '',
-                    ];
-                  }).toList(),
-                ),
-                pw.SizedBox(height: 15),
-                pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.grey100,
-                    borderRadius: pw.BorderRadius.circular(5),
-                  ),
-                  child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        "Total Hours:",
-                        style: pw.TextStyle(
-                          fontSize: 11,
-                          fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.blue800,
-                        ),
-                      ),
-                      pw.Text(
-                        totalHoursWorked.toStringAsFixed(2),
-                        style: pw.TextStyle(
-                          fontSize: 11,
-                          fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.blue800,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            );
+              ),
+            ];
           },
         ),
       );
 
       final bytes = await pdf.save();
       final fileName =
-          "workstudy_student_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf";
+          "workstudy_${studentName.replaceAll(' ', '_')}_report_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf";
       String message;
 
       if (kIsWeb) {
@@ -547,13 +980,37 @@ class _StudentDashboardState extends State<StudentDashboard>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.green),
+                const SizedBox(width: 8),
+                Expanded(child: Text(message)),
+              ],
+            ),
+            backgroundColor: const Color(0xFF032540),
+            behavior: SnackBarBehavior.floating,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(10)),
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error exporting PDF: $e")),
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.red),
+                const SizedBox(width: 8),
+                Expanded(child: Text("Error exporting PDF: $e")),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
@@ -634,51 +1091,69 @@ class _StudentDashboardState extends State<StudentDashboard>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            "Hello $ID 👋",
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: primaryColor,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
                           Row(
                             children: [
-                              Icon(Icons.business, size: 16, color: Colors.white70),
-                              const SizedBox(width: 4),
                               Text(
-                                "Department: ",
-                                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                "Hello ${studentName.isNotEmpty ? studentName : ID} 👋",
+                                style: const TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: primaryColor,
+                                ),
                               ),
-                              Text(
-                                studentDepartment.isEmpty ? "Loading..." : studentDepartment,
-                                style: const TextStyle(color: Colors.white70, fontSize: 14),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(Icons.email, size: 16, color: Colors.white70),
-                              const SizedBox(width: 4),
-                              Text(
-                                "Email: ",
-                                style: const TextStyle(color: Colors.white70, fontSize: 14),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  studentEmail.isEmpty ? "Loading..." : studentEmail,
-                                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                                  overflow: TextOverflow.ellipsis,
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: const BorderRadius.all(Radius.circular(20)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      isSessionActive ? Icons.circle : Icons.circle_outlined,
+                                      color: isSessionActive ? Colors.green : Colors.white,
+                                      size: 12,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      isSessionActive ? "Active" : "Inactive",
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          const Text(
-                            "Ready to track your work hours today?",
-                            style: TextStyle(color: Colors.white70),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.15),
+                              borderRadius: const BorderRadius.all(Radius.circular(12)),
+                            ),
+                            child: Column(
+                              children: [
+                                _buildInfoRow(Icons.business, "Department", studentDepartment),
+                                const SizedBox(height: 4),
+                                _buildInfoRow(Icons.email, "Email", studentEmail),
+                                if (isSessionActive && clockInTime != null) ...[
+                                  const SizedBox(height: 4),
+                                  _buildInfoRow(
+                                    Icons.access_time,
+                                    "Clocked in at",
+                                    DateFormat('hh:mm:ss a').format(clockInTime!),
+                                    iconColor: Colors.green,
+                                  ),
+                                ],
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -740,6 +1215,26 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
   }
 
+  Widget _buildInfoRow(IconData icon, String label, String value, {Color iconColor = Colors.white70}) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: iconColor),
+        const SizedBox(width: 8),
+        Text(
+          "$label: ",
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        Expanded(
+          child: Text(
+            value.isEmpty ? "Loading..." : value,
+            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _fadeSlideIn({required int delay, required Widget child}) {
     return TweenAnimationBuilder(
       tween: Tween<double>(begin: 0, end: 1),
@@ -759,7 +1254,9 @@ class _StudentDashboardState extends State<StudentDashboard>
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -793,7 +1290,9 @@ class _StudentDashboardState extends State<StudentDashboard>
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -809,6 +1308,62 @@ class _StudentDashboardState extends State<StudentDashboard>
               ],
             ),
             const SizedBox(height: 6),
+            if (isSessionActive && clockInTime != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: accentColor.withOpacity(0.1),
+                  borderRadius: const BorderRadius.all(Radius.circular(10)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Clocked in at",
+                          style: TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                        Text(
+                          DateFormat('hh:mm:ss a').format(clockInTime!),
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: accentColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: const BorderRadius.all(Radius.circular(20)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text(
+                            "Active",
+                            style: TextStyle(color: Colors.green, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             Text(
               isSessionActive
                   ? "Session in progress..."
@@ -821,7 +1376,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: accentColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: const BorderRadius.all(Radius.circular(10)),
                 ),
                 child: Column(
                   children: [
@@ -833,7 +1388,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     Text(
                       currentSessionDuration,
                       style: TextStyle(
-                        fontSize: 28,
+                        fontSize: 32,
                         fontWeight: FontWeight.bold,
                         fontFamily: "monospace",
                         color: accentColor,
@@ -841,36 +1396,55 @@ class _StudentDashboardState extends State<StudentDashboard>
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      "(${_calculateCurrentHours()} hours)",
+                      "${_calculateCurrentHours()} hours",
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
                 ),
               ),
             const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: isSessionActive ? handleClockOut : handleClockIn,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isSessionActive ? Colors.red : primaryColor,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: isSessionActive ? null : handleClockIn,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 17),
+                    ),
+                    icon: const Icon(Icons.play_arrow, color: Colors.white),
+                    label: const Text(
+                      "Clock In",
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
                 ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 17,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: isSessionActive ? handleClockOut : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isSessionActive ? Colors.red : Colors.grey,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 17),
+                    ),
+                    icon: const Icon(Icons.stop, color: Colors.white),
+                    label: const Text(
+                      "Clock Out",
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
                 ),
-              ),
-              icon: Icon(
-                isSessionActive ? Icons.stop : Icons.play_arrow,
-                color: Colors.white,
-              ),
-              label: Text(
-                isSessionActive ? "Clock Out" : "Clock In",
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              ),
+              ],
             ),
           ],
         ),
@@ -878,32 +1452,26 @@ class _StudentDashboardState extends State<StudentDashboard>
     );
   }
 
-  String _calculateCurrentHours() {
-    final parts = currentSessionDuration.split(':');
-    if (parts.length == 3) {
-      final totalSeconds = (int.parse(parts[0]) * 3600) +
-          (int.parse(parts[1]) * 60) +
-          int.parse(parts[2]);
-      return (totalSeconds / 3600).toStringAsFixed(2);
-    }
-    return "0.00";
-  }
-
   Widget _buildCommentCard(Color primaryColor, Color accentColor) {
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Work Description",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
+            Row(
+              children: [
+                Icon(Icons.description, color: accentColor),
+                const SizedBox(width: 8),
+                const Text(
+                  "Work Description",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             const Align(
@@ -916,15 +1484,30 @@ class _StudentDashboardState extends State<StudentDashboard>
             const SizedBox(height: 12),
             TextField(
               maxLines: 3,
-              onChanged: (val) => setState(() => comment = val),
+              onChanged: (val) {
+                setState(() => comment = val);
+                _draftSaveTimer?.cancel();
+                _draftSaveTimer = Timer(const Duration(seconds: 2), _saveDraftDescription);
+              },
               decoration: InputDecoration(
                 hintText: "Describe your work...",
                 filled: true,
                 fillColor: Colors.grey.shade100,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: const BorderRadius.all(Radius.circular(10)),
                   borderSide: BorderSide.none,
                 ),
+                suffixIcon: comment.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 20),
+                        onPressed: () {
+                          setState(() {
+                            comment = "";
+                            _draftDescription = "";
+                          });
+                        },
+                      )
+                    : null,
               ),
             ),
             const SizedBox(height: 12),
@@ -933,8 +1516,8 @@ class _StudentDashboardState extends State<StudentDashboard>
                 onPressed: handleSubmitHours,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: primaryColor,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
@@ -957,13 +1540,15 @@ class _StudentDashboardState extends State<StudentDashboard>
   Widget _buildActivityCard(Color primaryColor, Color accentColor) {
     List<Map<String, dynamic>> filteredActivities = studentActivities
         .where((activity) =>
-            activity["status"]?.toLowerCase() == selectedActivityTab)
+            activity["status"]?.toLowerCase() == selectedActivityTab.toLowerCase())
         .toList();
 
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1004,94 +1589,194 @@ class _StudentDashboardState extends State<StudentDashboard>
             ),
             const SizedBox(height: 12),
             SizedBox(
-              height: 200,
+              height: 250,
               child: filteredActivities.isEmpty
                   ? Center(
-                      child: Text(
-                        "No $selectedActivityTab activities available",
-                        style: const TextStyle(color: Colors.grey),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.inbox,
+                            size: 48,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            "No $selectedActivityTab activities",
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                        ],
                       ),
                     )
                   : ListView.builder(
                       itemCount: filteredActivities.length,
                       itemBuilder: (context, index) {
                         final activity = filteredActivities[index];
+                        final clockIn = activity["clockIn"] as DateTime?;
+                        final clockOut = activity["clockOut"] as DateTime?;
+                        
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.grey.shade200),
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: const BorderRadius.all(Radius.circular(10)),
                           ),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Row(
                                       children: [
-                                        const Icon(
+                                        Icon(
                                           Icons.calendar_today,
                                           size: 14,
-                                          color: Colors.grey,
+                                          color: Colors.grey.shade600,
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
                                           activity["date"],
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 12,
-                                            color: Colors.grey,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: activity["status"]
-                                                        ?.toLowerCase() ==
-                                                    "approved"
-                                                ? Colors.green
-                                                : activity["status"]
-                                                            ?.toLowerCase() ==
-                                                        "rejected"
-                                                    ? Colors.red
-                                                    : Colors.orange,
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                          ),
-                                          child: Text(
-                                            activity["status"] ?? 'Pending',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                            ),
+                                            color: Colors.grey.shade600,
                                           ),
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      activity["description"] ?? '',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w500,
-                                        color: Color(0xFF032540),
-                                      ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
                                     ),
-                                  ],
-                                ),
+                                    decoration: BoxDecoration(
+                                      color: activity["status"]?.toLowerCase() == "approved"
+                                          ? Colors.green
+                                          : activity["status"]?.toLowerCase() == "declined"
+                                              ? Colors.red
+                                              : Colors.orange,
+                                      borderRadius: const BorderRadius.all(Radius.circular(8)),
+                                    ),
+                                    child: Text(
+                                      activity["status"] ?? 'Pending',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
+                              const SizedBox(height: 8),
+                              if (clockIn != null || clockOut != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade50,
+                                    borderRadius: const BorderRadius.all(Radius.circular(8)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      if (clockIn != null)
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.login,
+                                                size: 12,
+                                                color: Colors.green.shade700,
+                                              ),
+                                              const SizedBox(width: 2),
+                                              Text(
+                                                DateFormat('hh:mm a').format(clockIn),
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.green.shade700,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      if (clockOut != null)
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.logout,
+                                                size: 12,
+                                                color: Colors.red.shade700,
+                                              ),
+                                              const SizedBox(width: 2),
+                                              Text(
+                                                DateFormat('hh:mm a').format(clockOut),
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.red.shade700,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
                               Text(
-                                "${activity["hours"]?.toStringAsFixed(1)}h",
+                                activity["description"] ?? '',
                                 style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
+                                  fontWeight: FontWeight.w500,
                                   color: Color(0xFF032540),
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (activity["feedback"] != null && activity["feedback"].toString().isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade50,
+                                    borderRadius: const BorderRadius.all(Radius.circular(6)),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        Icons.feedback,
+                                        size: 12,
+                                        color: Colors.blue.shade700,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          activity["feedback"],
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.blue.shade700,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  "${activity["hours"]?.toStringAsFixed(1)}h",
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF032540),
+                                  ),
                                 ),
                               ),
                             ],
@@ -1114,17 +1799,22 @@ class _StudentDashboardState extends State<StudentDashboard>
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: const BorderRadius.all(Radius.circular(20)),
           color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
+          border: Border.all(
+            color: isSelected ? color : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+            fontSize: 13,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             color: isSelected ? color : Colors.grey.shade600,
           ),
         ),
@@ -1136,46 +1826,78 @@ class _StudentDashboardState extends State<StudentDashboard>
     return Card(
       color: Colors.white.withOpacity(0.85),
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            Row(
+              children: [
+                Icon(Icons.download, color: accentColor),
+                const SizedBox(width: 8),
+                const Text(
+                  "Export Reports",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             const Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                "Export Reports",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                "Download your work history with detailed timestamps",
+                style: TextStyle(color: Colors.grey, fontSize: 13),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
+                  child: _buildExportButton(
+                    icon: Icons.table_chart,
+                    label: "Excel",
+                    color: Colors.green,
                     onPressed: exportExcel,
-                    icon: const Icon(Icons.table_chart, color: Colors.green),
-                    label: const Text(
-                      "Export Excel",
-                      style: TextStyle(color: Colors.green),
-                    ),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: OutlinedButton.icon(
+                  child: _buildExportButton(
+                    icon: Icons.picture_as_pdf,
+                    label: "PDF",
+                    color: Colors.red,
                     onPressed: exportPDF,
-                    icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
-                    label: const Text(
-                      "Export PDF",
-                      style: TextStyle(color: Colors.red),
-                    ),
                   ),
                 ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildExportButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, color: color),
+      label: Text(
+        label,
+        style: TextStyle(color: color),
+      ),
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: color),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(10)),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12),
       ),
     );
   }
