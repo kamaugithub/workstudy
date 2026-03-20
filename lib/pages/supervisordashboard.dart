@@ -936,8 +936,8 @@ class ApprovalCardContent extends StatefulWidget {
     required this.activities,
     required this.onTabChanged,
     required this.onApprovalChanged,
-    required this.primaryColor, // Added
-    required this.accentColor, // Added
+    required this.primaryColor, 
+    required this.accentColor, 
   });
 
   @override
@@ -966,7 +966,7 @@ class _ApprovalCardContentState extends State<ApprovalCardContent> {
             Row(
               children: [
                 Icon(Icons.rule,
-                    color: widget.accentColor), // Fixed: use widget.accentColor
+                    color: widget.accentColor), 
                 const SizedBox(width: 8),
                 const Text("Student Activity Approvals",
                     style:

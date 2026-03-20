@@ -27,7 +27,7 @@ class _StudentDashboardState extends State<StudentDashboard>
   bool isSessionActive = false;
   String currentSessionDuration = "00:00:00";
   String comment = "";
-  Timer? timer; // Make it nullable
+  Timer? timer;
   DateTime startTime = DateTime.now();
   DateTime? clockInTime;
   DateTime? clockOutTime;
@@ -47,7 +47,6 @@ class _StudentDashboardState extends State<StudentDashboard>
   late Animation<double> _horizontalMovement;
   late Animation<double> _verticalMovement;
   
-  // Draft description persistence
   Timer? _draftSaveTimer;
   String _draftDescription = "";
 
@@ -74,7 +73,7 @@ class _StudentDashboardState extends State<StudentDashboard>
   @override
   void dispose() {
     _titleController.dispose();
-    timer?.cancel(); // Safe call with ?.
+    timer?.cancel();
     _draftSaveTimer?.cancel();
     _activitiesSubscription?.cancel();
     _saveDraftDescription();
@@ -292,7 +291,7 @@ class _StudentDashboardState extends State<StudentDashboard>
   }
 
   void handleClockOut() {
-    timer?.cancel(); // Safe call with ?.
+    timer?.cancel();
     
     setState(() {
       isSessionActive = false;
@@ -534,7 +533,7 @@ class _StudentDashboardState extends State<StudentDashboard>
         currentSessionDuration = "00:00:00";
       });
 
-      timer?.cancel(); // Safe call with ?.
+      timer?.cancel();
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -609,6 +608,7 @@ class _StudentDashboardState extends State<StudentDashboard>
       final workbook = excel.Excel.createExcel();
       final sheet = workbook['WorkStudy Report'];
 
+      // Title and header styling
       sheet.appendRow([excel.TextCellValue("")]);
       sheet.appendRow([excel.TextCellValue("WORKSTUDY")]);
       sheet.appendRow([excel.TextCellValue("Student Work Report")]);
@@ -620,6 +620,7 @@ class _StudentDashboardState extends State<StudentDashboard>
       ]);
       sheet.appendRow([]);
 
+      // Headers
       sheet.appendRow([
         excel.TextCellValue("Date"),
         excel.TextCellValue("Clock In"),
@@ -629,22 +630,29 @@ class _StudentDashboardState extends State<StudentDashboard>
         excel.TextCellValue("Description"),
       ]);
 
+      // Data rows - FIXED: Now properly displays clock in/out times
       for (var session in sessions) {
         final clockIn = session["clockIn"] as Timestamp?;
         final clockOut = session["clockOut"] as Timestamp?;
         
+        // Format clock in time with full timestamp if available
+        String clockInStr = 'N/A';
+        if (clockIn != null) {
+          final clockInDate = clockIn.toDate();
+          clockInStr = DateFormat('hh:mm:ss a').format(clockInDate);
+        }
+        
+        // Format clock out time with full timestamp if available
+        String clockOutStr = 'N/A';
+        if (clockOut != null) {
+          final clockOutDate = clockOut.toDate();
+          clockOutStr = DateFormat('hh:mm:ss a').format(clockOutDate);
+        }
+        
         sheet.appendRow([
           excel.TextCellValue(session["date"] ?? ''),
-          excel.TextCellValue(
-            clockIn != null 
-                ? DateFormat('hh:mm:ss a').format(clockIn.toDate())
-                : 'N/A'
-          ),
-          excel.TextCellValue(
-            clockOut != null 
-                ? DateFormat('hh:mm:ss a').format(clockOut.toDate())
-                : 'N/A'
-          ),
+          excel.TextCellValue(clockInStr),
+          excel.TextCellValue(clockOutStr),
           excel.TextCellValue(session["hours"]?.toStringAsFixed(2) ?? '0.00'),
           excel.TextCellValue(session["status"] ?? ''),
           excel.TextCellValue(session["reportDetails"] ?? ''),
@@ -739,6 +747,35 @@ class _StudentDashboardState extends State<StudentDashboard>
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(20),
           build: (context) {
+            // Prepare table data with proper clock times
+            final List<List<String>> tableData = [];
+            
+            for (var session in sessions) {
+              final clockIn = session["clockIn"] as Timestamp?;
+              final clockOut = session["clockOut"] as Timestamp?;
+              
+              String clockInStr = 'N/A';
+              if (clockIn != null) {
+                final clockInDate = clockIn.toDate();
+                clockInStr = DateFormat('hh:mm:ss a').format(clockInDate);
+              }
+              
+              String clockOutStr = 'N/A';
+              if (clockOut != null) {
+                final clockOutDate = clockOut.toDate();
+                clockOutStr = DateFormat('hh:mm:ss a').format(clockOutDate);
+              }
+              
+              tableData.add([
+                session["date"] ?? '',
+                clockInStr,
+                clockOutStr,
+                session["hours"]?.toStringAsFixed(2) ?? '0.00',
+                session["status"] ?? '',
+                session["reportDetails"] ?? '',
+              ]);
+            }
+            
             return [
               pw.Row(
                 children: [
@@ -865,23 +902,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                   5: pw.Alignment.centerLeft,
                 },
                 headers: ["Date", "Clock In", "Clock Out", "Hours", "Status", "Description"],
-                data: sessions.map((e) {
-                  final clockIn = e["clockIn"] as Timestamp?;
-                  final clockOut = e["clockOut"] as Timestamp?;
-                  
-                  return [
-                    e["date"] ?? '',
-                    clockIn != null 
-                        ? DateFormat('hh:mm a').format(clockIn.toDate())
-                        : 'N/A',
-                    clockOut != null 
-                        ? DateFormat('hh:mm a').format(clockOut.toDate())
-                        : 'N/A',
-                    e["hours"]?.toStringAsFixed(2) ?? '0.00',
-                    e["status"] ?? '',
-                    e["reportDetails"] ?? '',
-                  ];
-                }).toList(),
+                data: tableData,
               ),
               pw.SizedBox(height: 15),
               pw.Container(
